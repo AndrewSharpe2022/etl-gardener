@@ -79,7 +79,6 @@ func TestWithTaskQueue(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	th.Terminate()
 	th.Wait()
 	log.Println(counter.Count())
 	log.Println("Deletes:", len(saver.GetDeletes()))

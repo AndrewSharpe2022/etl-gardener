@@ -16,33 +16,6 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
-func assertTaskPipe(t state.Terminator) {
-	func(t state.Terminator) {}(&reproc.Terminator{})
-}
-
-// This test exercises the termination sequencing.  It does not check
-// any state, but if the termination does not work properly,
-// may fail to complete.  Also, running with -race may detect race
-// conditions.
-func TestTerminator(t *testing.T) {
-	trm := reproc.NewTerminator()
-	notifier := trm.GetNotifyChannel()
-
-	trm.Add(1)
-	go func() {
-		<-notifier
-		trm.Done()
-	}()
-	trm.Add(1)
-	go func() {
-		<-notifier
-		trm.Done()
-	}()
-
-	trm.Terminate()
-	trm.Wait()
-}
-
 //===================================================
 type testSaver struct {
 	tasks  map[string][]state.Task
@@ -74,7 +47,7 @@ func assertSaver() { func(ex state.Saver) {}(&testSaver{}) }
 
 type Exec struct{}
 
-func (ex *Exec) Next(t *state.Task, terminate <-chan struct{}) {
+func (ex *Exec) Next(t *state.Task) {
 	log.Println("Do", t)
 	time.Sleep(time.Duration(1+rand.Intn(2)) * time.Millisecond)
 
@@ -105,9 +78,6 @@ func (ex *Exec) Next(t *state.Task, terminate <-chan struct{}) {
 func AssertExecutor() { func(ex state.Executor) {}(&Exec{}) }
 
 // This test exercises the task management, including invoking t.Process().
-//  It does not check any state, but if the termination does not work properly,
-// may fail to complete.  Also, running with -race may detect race
-// conditions.
 func TestBasic(t *testing.T) {
 	// Start tracker with no queues.
 	exec := Exec{}
@@ -119,8 +89,7 @@ func TestBasic(t *testing.T) {
 	// Just so it is clear where the message comes from...
 	time.Sleep(time.Duration(1+rand.Intn(10)) * time.Millisecond)
 
-	th.Terminate()
-	th.Wait() // Race
+	th.Wait()
 }
 
 // This test exercises the task management, including invoking t.Process().
@@ -139,7 +108,6 @@ func TestWithTaskQueue(t *testing.T) {
 	go th.AddTask("gs://fake/ndt/2017/09/26/")
 
 	time.Sleep(15 * time.Millisecond)
-	th.Terminate()
 	th.Wait()
 }
 

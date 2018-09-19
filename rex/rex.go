@@ -57,9 +57,8 @@ var ErrNoSaver = errors.New("Task.saver is nil")
 
 // Next executes the currently specified action, updates Err/ErrInfo, and advances
 // the state.
-// It may terminate prematurely if terminate is closed prior to completion.
 // TODO - consider returning any error to caller.
-func (rex *ReprocessingExecutor) Next(t *state.Task, terminate <-chan struct{}) {
+func (rex *ReprocessingExecutor) Next(t *state.Task) {
 	// Note that only the state in state.Task is maintained between actions.
 	switch t.State {
 	case state.Initializing:
@@ -74,7 +73,7 @@ func (rex *ReprocessingExecutor) Next(t *state.Task, terminate <-chan struct{}) 
 		t.Update(state.Processing)
 
 	case state.Processing: // TODO should this be Parsing?
-		rex.waitForParsing(t, terminate)
+		rex.waitForParsing(t)
 		t.Queue = "" // No longer need to keep the queue.
 		t.Update(state.Stabilizing)
 
@@ -110,7 +109,7 @@ func (rex *ReprocessingExecutor) Next(t *state.Task, terminate <-chan struct{}) 
 
 	case state.Finishing:
 		log.Println("Finishing")
-		rex.finish(t, terminate)
+		rex.finish(t)
 		t.JobID = ""
 		t.Update(state.Done)
 		t.Delete()
@@ -129,7 +128,7 @@ func (rex *ReprocessingExecutor) Next(t *state.Task, terminate <-chan struct{}) 
 }
 
 // TODO should these take Task instead of *Task?
-func (rex *ReprocessingExecutor) waitForParsing(t *state.Task, terminate <-chan struct{}) {
+func (rex *ReprocessingExecutor) waitForParsing(t *state.Task) {
 	// Wait for the queue to drain.
 	// Don't want to accept a date until we can actually queue it.
 	qh, err := tq.NewQueueHandler(rex.Config, t.Queue)
@@ -140,12 +139,6 @@ func (rex *ReprocessingExecutor) waitForParsing(t *state.Task, terminate <-chan 
 	}
 	log.Println("Wait for empty queue ", qh.Queue)
 	for err := qh.IsEmpty(); err != nil; err = qh.IsEmpty() {
-		select {
-		case <-terminate:
-			t.SetError(err, "Terminating")
-			return
-		default:
-		}
 		if err == tq.ErrMoreTasks {
 			// Wait 5-15 seconds before checking again.
 			time.Sleep(time.Duration(5+rand.Intn(10)) * time.Second)
@@ -195,8 +188,7 @@ func (rex *ReprocessingExecutor) queue(t *state.Task) int {
 		t.SetError(err, "BucketError")
 		return 0
 	}
-	// NOTE: This does not check the terminate channel, so once started, it will
-	// complete the queuing.
+
 	n, err := qh.PostDay(bucket, bucketName, parts[1]+"/"+parts[2]+"/")
 	if err != nil {
 		log.Println(err)
@@ -246,15 +238,10 @@ func (rex *ReprocessingExecutor) dedup(t *state.Task) {
 // >= maxBackoff, at which point it continues using same backoff.
 // TODO - develop a BQJob interface for wrapping bigquery.Job, and allowing fakes.
 // TODO - move this to go/bqext, since it is bigquery specific and general purpose.
-func waitForJob(ctx context.Context, job *bigquery.Job, maxBackoff time.Duration, terminate <-chan struct{}) error {
+func waitForJob(ctx context.Context, job *bigquery.Job, maxBackoff time.Duration) error {
 	backoff := 10 * time.Millisecond
 	previous := backoff
 	for {
-		select {
-		case <-terminate:
-			return state.ErrTaskSuspended
-		default:
-		}
 		status, err := job.Status(ctx)
 		if err != nil {
 			log.Println(err)
@@ -283,7 +270,7 @@ func waitForJob(ctx context.Context, job *bigquery.Job, maxBackoff time.Duration
 	return nil
 }
 
-func (rex *ReprocessingExecutor) finish(t *state.Task, terminate <-chan struct{}) {
+func (rex *ReprocessingExecutor) finish(t *state.Task) {
 	// TODO use a simple client instead of creating dataset?
 	ds, err := bqext.NewDataset(rex.Project, rex.BQDataset, rex.Options...)
 	if err != nil {
@@ -303,8 +290,7 @@ func (rex *ReprocessingExecutor) finish(t *state.Task, terminate <-chan struct{}
 		t.SetError(err, "JobFromID")
 		return
 	}
-	// TODO - should loop, and check terminate channel
-	err = waitForJob(context.Background(), job, 10*time.Second, terminate)
+	err = waitForJob(context.Background(), job, 10*time.Second)
 	if err != nil {
 		log.Println(err, src.FullyQualifiedName())
 		metrics.FailCount.WithLabelValues("JobTableNotFound")

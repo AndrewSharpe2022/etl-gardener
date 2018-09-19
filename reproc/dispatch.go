@@ -9,7 +9,6 @@
 package reproc
 
 import (
-	"errors"
 	"log"
 	"sync"
 	"time"
@@ -18,57 +17,17 @@ import (
 )
 
 /*****************************************************************************/
-/*                         Terminator helper struct                          */
-/*****************************************************************************/
-
-// Terminator provides signals for a termination process.
-//  GetNotifyChannel to get the channel that goroutines should monitor.
-//     Whenever caller creates a goroutine, it should first call Add(1).
-//  GetNotifyChannel() to get termination notifier channel to pass to
-//     goroutines (after calling Add(1))
-//  Terminate() to start the termination process.
-//  Call Done() whenever a goroutine completes.
-//  Call Wait() to wait until all goroutines have completed.
-type Terminator struct {
-	once        sync.Once     // Protects the exit initiation.
-	terminating chan struct{} // Channel to trigger termination.
-	sync.WaitGroup
-}
-
-// GetNotifyChannel returns the channel that indicates termination has started.
-func (t *Terminator) GetNotifyChannel() <-chan struct{} {
-	return t.terminating
-}
-
-// Terminate initiates termination.  May be called multiple times.
-func (t *Terminator) Terminate() {
-	t.once.Do(func() {
-		// we consumed the token, so close the channel.
-		close(t.terminating)
-	})
-}
-
-// NewTerminator creates a new Terminator (termination manager)
-func NewTerminator() *Terminator {
-	sem := make(chan struct{}, 1)
-	sem <- struct{}{}
-	return &Terminator{sync.Once{}, make(chan struct{}), sync.WaitGroup{}}
-}
-
-/*****************************************************************************/
 /*                               TaskHandler                                 */
 /*****************************************************************************/
 
 // TaskHandler handles the top level Task coordination.
-// It is responsible for starting tasks, recycling queues, and handling the
-// termination signal.
+// It is responsible for starting tasks and recycling queues.
 type TaskHandler struct {
 	exec       state.Executor // Executor passed to new tasks
 	taskQueues chan string    // Channel through which queues recycled.
 	saver      state.Saver    // The Saver used to save task states.
 
-	// For managing termination.
-	*Terminator
+	sync.WaitGroup
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -79,19 +38,13 @@ func NewTaskHandler(exec state.Executor, queues []string, saver state.Saver) *Ta
 		taskQueues <- q
 	}
 
-	return &TaskHandler{exec, taskQueues, saver, NewTerminator()}
+	return &TaskHandler{exec, taskQueues, saver, sync.WaitGroup{}}
 }
-
-// ErrTerminating is returned e.g. by AddTask, when tracker is terminating.
-var ErrTerminating = errors.New("TaskHandler is terminating")
 
 // StartTask starts a single task.  It should be properly initialized except for saver.
 func (th *TaskHandler) StartTask(t state.Task) {
 	t.SetSaver(th.saver)
 
-	// WARNING:  There is a race here when terminating, if a task gets
-	// a queue here and calls Add().  This races with the thread that started
-	// the termination and calls Wait().
 	th.Add(1)
 	// We pass a function to Process that it should call when finished
 	// using the queue (when queue has drained.  Since this runs in its own
@@ -101,7 +54,7 @@ func (th *TaskHandler) StartTask(t state.Task) {
 		log.Println("Returning", t.Queue)
 		th.taskQueues <- t.Queue
 	}
-	go t.Process(th.exec, doneWithQueue, th.Terminator)
+	go t.Process(th.exec, doneWithQueue, &th.WaitGroup)
 }
 
 // AddTask adds a new task, blocking until the task has been accepted.
@@ -111,23 +64,15 @@ func (th *TaskHandler) StartTask(t state.Task) {
 // TODO: Add prometheus metrics.
 func (th *TaskHandler) AddTask(prefix string) error {
 	log.Println("Waiting for a queue")
-	select {
-	// Wait until there is an available task queue.
-	case queue := <-th.taskQueues:
-		t, err := state.NewTask(prefix, queue, th.saver)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-		log.Println("Adding:", t.Name)
-		th.StartTask(*t)
-		return nil
-
-	// Or until we start termination.
-	case <-th.GetNotifyChannel():
-		// If we are terminating, do nothing.
-		return ErrTerminating
+	queue := <-th.taskQueues
+	t, err := state.NewTask(prefix, queue, th.saver)
+	if err != nil {
+		log.Println(err)
+		return err
 	}
+	log.Println("Adding:", t.Name)
+	th.StartTask(*t)
+	return nil
 }
 
 // RestartTasks restarts all the tasks, allocating queues as needed.

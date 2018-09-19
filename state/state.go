@@ -10,6 +10,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -56,7 +57,7 @@ var (
 // Used for mocking.
 // Interface must update the task in place, so that state changes are all visible.
 type Executor interface {
-	Next(task *Task, terminate <-chan struct{})
+	Next(task *Task)
 }
 
 // Saver provides API for saving Task state.
@@ -242,25 +243,20 @@ type Terminator interface {
 }
 
 // Process handles all steps of processing a task.
-func (t Task) Process(ex Executor, doneWithQueue func(), term Terminator) {
-loop:
+func (t Task) Process(ex Executor, doneWithQueue func(), wg *sync.WaitGroup) {
 	for t.State != Done { //&& t.ErrMsg == "" {
-		select {
-		case <-term.GetNotifyChannel():
-			t.SetError(ErrTaskSuspended, "Terminating")
-			break loop
+		switch t.State {
+		case Processing:
+			ex.Next(&t)
+			log.Printf("returning queue from %s %p\n", t.Name, &t)
+			doneWithQueue()
 		default:
-			switch t.State {
-			case Processing:
-				ex.Next(&t, term.GetNotifyChannel())
-				log.Printf("returning queue from %s %p\n", t.Name, &t)
-				doneWithQueue()
-			default:
-				ex.Next(&t, term.GetNotifyChannel())
-			}
+			ex.Next(&t)
 		}
 	}
-	term.Done()
+	if wg != nil {
+		wg.Done()
+	}
 }
 
 // GetStatus fetches all Task state from Datastore.
