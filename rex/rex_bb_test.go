@@ -11,6 +11,7 @@ import (
 	"github.com/m-lab/etl-gardener/cloud"
 	"github.com/m-lab/etl-gardener/reproc"
 	"github.com/m-lab/etl-gardener/rex"
+	"google.golang.org/api/option"
 )
 
 // This test exercises the task management, including invoking t.Process().
@@ -23,9 +24,12 @@ func TestRealBucket(t *testing.T) {
 	client, counter := cloud.DryRunClient()
 	config := cloud.Config{Project: "mlab-testing", Client: client}
 	bqConfig := cloud.BQConfig{Config: config, BQProject: "mlab-testing", BQDataset: "batch"}
-	exec := rex.ReprocessingExecutor{BQConfig: bqConfig}
+	exec, err := rex.NewReprocessingExecutor(ctx, bqConfig, []option.ClientOption{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	saver := newTestSaver()
-	th := reproc.NewTaskHandler(&exec, []string{"queue-1"}, saver)
+	th := reproc.NewTaskHandler(exec, []string{"queue-1"}, saver)
 
 	// We submit tasks corresponding to real buckets...
 	th.AddTask(ctx, "gs://archive-mlab-testing/ndt/2017/09/22/")
