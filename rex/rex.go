@@ -25,6 +25,7 @@ import (
 	"github.com/m-lab/etl-gardener/metrics"
 	"github.com/m-lab/etl-gardener/state"
 	"github.com/m-lab/go/bqext"
+	"google.golang.org/api/option"
 )
 
 // Environment provides "global" variables.
@@ -50,7 +51,7 @@ type ReprocessingExecutor struct {
 
 // NewReprocessingExecutor creates a new exec.
 // NOTE:  The context is used to create a persistent storage Client!
-func NewReprocessingExecutor(ctx context.Context, config cloud.BQConfig, bucketOpts []options.ClientOption) (*ReprocessingExecutor, error) {
+func NewReprocessingExecutor(ctx context.Context, config cloud.BQConfig, bucketOpts []option.ClientOption) (*ReprocessingExecutor, error) {
 	storageClient, err := storage.NewClient(ctx, bucketOpts...)
 	if err != nil {
 		return nil, err
