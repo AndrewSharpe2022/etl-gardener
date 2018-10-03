@@ -69,9 +69,12 @@ func TestWithTaskQueue(t *testing.T) {
 	config := cloud.Config{Project: "mlab-testing", Client: client}
 	bqConfig := cloud.BQConfig{Config: config, BQProject: "bqproject", BQDataset: "dataset"}
 	bucketOpts := []option.ClientOption{option.WithHTTPClient(client)}
-	exec := rex.ReprocessingExecutor{BQConfig: bqConfig, BucketOpts: bucketOpts}
+	exec, err := rex.NewReprocessingExecutor(ctx, bqConfig, bucketOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	saver := newTestSaver()
-	th := reproc.NewTaskHandler(&exec, []string{"queue-1"}, saver)
+	th := reproc.NewTaskHandler(exec, []string{"queue-1"}, saver)
 
 	th.AddTask(ctx, "gs://foo/bar/2001/01/01/")
 
@@ -122,7 +125,7 @@ type fakeBucketHandle struct {
 	stiface.BucketHandle
 }
 
-func (f fakeBucketHandle) Objects(context.Context, *storage.Query) ObjectIterator {
+func (f fakeBucketHandle) Objects(context.Context, *storage.Query) stiface.ObjectIterator {
 	return fakeObjectIterator{}
 }
 
@@ -132,10 +135,10 @@ type fakeObjectIterator struct {
 	next    int
 }
 
-func (it *fakeObjectIterator) Next() (*storage.ObjectAttrs, error) {
-	if next >= len(objects) {
+func (it fakeObjectIterator) Next() (*storage.ObjectAttrs, error) {
+	if it.next >= len(it.objects) {
 		return nil, errors.New("storage error?")
 	}
-	next++
-	return objects[next-1], nil
+	it.next++
+	return it.objects[it.next-1], nil
 }

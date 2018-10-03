@@ -167,7 +167,10 @@ func taskHandlerFromEnv(ctx context.Context, client *http.Client) (*reproc.TaskH
 		Client:  client}
 
 	bqConfig := NewBQConfig(config)
-	exec := rex.ReprocessingExecutor{BQConfig: bqConfig, BucketOpts: []option.ClientOption{}}
+	exec, err := rex.NewReprocessingExecutor(ctx, bqConfig, []option.ClientOption{})
+	if err != nil {
+		return nil, err
+	}
 	queues := make([]string, env.NumQueues)
 	for i := 0; i < env.NumQueues; i++ {
 		queues[i] = fmt.Sprintf("%s%d", env.QueueBase, i)
@@ -178,7 +181,7 @@ func taskHandlerFromEnv(ctx context.Context, client *http.Client) (*reproc.TaskH
 	if err != nil {
 		return nil, err
 	}
-	return reproc.NewTaskHandler(&exec, queues, saver), nil
+	return reproc.NewTaskHandler(exec, queues, saver), nil
 }
 
 // doDispatchLoop just sequences through archives in date order.
