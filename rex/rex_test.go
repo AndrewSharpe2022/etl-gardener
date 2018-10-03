@@ -2,11 +2,14 @@ package rex_test
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/storage"
+	"github.com/GoogleCloudPlatform/google-cloud-go-testing/storage/stiface"
 	"github.com/m-lab/etl-gardener/cloud"
 	"github.com/m-lab/etl-gardener/reproc"
 	"github.com/m-lab/etl-gardener/rex"
@@ -61,7 +64,7 @@ func (s *testSaver) GetDeletes() map[string]struct{} {
 // conditions.
 // TODO - use a fake bigtable, so that tasks can get beyond Stabilizing.
 func TestWithTaskQueue(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	client, counter := cloud.DryRunClient()
 	config := cloud.Config{Project: "mlab-testing", Client: client}
 	bqConfig := cloud.BQConfig{Config: config, BQProject: "bqproject", BQDataset: "dataset"}
@@ -72,6 +75,7 @@ func TestWithTaskQueue(t *testing.T) {
 
 	th.AddTask(ctx, "gs://foo/bar/2001/01/01/")
 
+	cancel()
 	go th.AddTask(ctx, "gs://foo/bar/2001/01/02/")
 	go th.AddTask(ctx, "gs://foo/bar/2001/01/03/")
 
@@ -97,4 +101,41 @@ func TestWithTaskQueue(t *testing.T) {
 		}
 	}
 
+}
+
+// Adapted from google-cloud-go-testing/storage/stiface/stiface_test.go
+//
+// By using the "interface" version of the client, we make it possible to sub in
+// our own fakes at any level. Here we sub in a fake Client which returns a fake
+// BucketHandle that returns a fake Object, that returns a Writer in which all
+// writes will fail. This is only a "blackbox" test in the most technical of
+// senses, but it allows us to exercise error paths.
+type fakeClient struct {
+	stiface.Client
+}
+
+func (f fakeClient) Bucket(name string) stiface.BucketHandle {
+	return &fakeBucketHandle{}
+}
+
+type fakeBucketHandle struct {
+	stiface.BucketHandle
+}
+
+func (f fakeBucketHandle) Objects(context.Context, *storage.Query) ObjectIterator {
+	return fakeObjectIterator{}
+}
+
+type fakeObjectIterator struct {
+	stiface.ObjectIterator
+	objects []*stiface.ObjectAttrs
+	next    int
+}
+
+func (it *fakeObjectIterator) Next() (*storage.ObjectAttrs, error) {
+	if next >= len(objects) {
+		return nil, errors.New("storage error?")
+	}
+	next++
+	return objects[next-1], nil
 }
