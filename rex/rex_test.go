@@ -128,7 +128,7 @@ func (f fakeBucketHandle) Objects(context.Context, *storage.Query) ObjectIterato
 
 type fakeObjectIterator struct {
 	stiface.ObjectIterator
-	objects []*stiface.ObjectAttrs
+	objects []*storage.ObjectAttrs
 	next    int
 }
 
