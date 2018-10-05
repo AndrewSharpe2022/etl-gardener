@@ -125,7 +125,7 @@ func (qh QueueHandler) PostOneTask(bucket, fn string) error {
 		if strings.Contains(message, "UNKNOWN_QUEUE") {
 			return errors.New(message + " " + qh.Queue)
 		}
-		log.Println(string(buf))
+		log.Println(message)
 		return errors.New(resp.Status + " :: " + message)
 	}
 
@@ -135,6 +135,7 @@ func (qh QueueHandler) PostOneTask(bucket, fn string) error {
 // postWithRetry posts a single task to a task queue.  It will make up to 3 attempts
 // if there are recoverable errors.
 func (qh *QueueHandler) postWithRetry(bucket, filepath string) error {
+	// TODO - this seems like too big a backoff.  Exponential instead?
 	backoff := 50 * time.Second
 	var err error
 	for i := 0; i < 3; i++ {

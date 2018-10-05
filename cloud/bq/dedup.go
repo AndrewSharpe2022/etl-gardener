@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"github.com/GoogleCloudPlatform/google-cloud-go-testing/bigquery/bqiface"
 	"github.com/m-lab/etl-gardener/metrics"
 	"github.com/m-lab/go/bqext"
 )
@@ -31,7 +32,7 @@ var (
 
 // WaitForStableTable loops checking until table exists and has no streaming buffer.
 // TODO - move these functions to go/bqext package
-func WaitForStableTable(ctx context.Context, tt *bigquery.Table) error {
+func WaitForStableTable(ctx context.Context, tt bqiface.Table) error {
 	errorTimeout := 2 * time.Minute
 	if testMode {
 		errorTimeout = 100 * time.Millisecond
@@ -135,28 +136,28 @@ var dedupTemplateSidestream = `
 // suffix to avoid accidentally overwriting the entire table.
 // TODO - move these functions to go/bqext package
 // TODO - should we get the context from the dsExt?
-func Dedup(ctx context.Context, dsExt *bqext.Dataset, src string, destTable *bigquery.Table) (*bigquery.Job, error) {
-	if !strings.Contains(destTable.TableID, "$") {
+func Dedup(ctx context.Context, dsExt *bqext.Dataset, src string, destTable bqiface.Table) (bqiface.Job, error) {
+	if !strings.Contains(destTable.TableID(), "$") {
 		meta, err := destTable.Metadata(ctx)
 		if err == nil && meta.TimePartitioning != nil {
 			return nil, errors.New("Destination table must specify partition")
 		}
 	}
 
-	log.Printf("Removing dups and writing to %s.%s\n", destTable.DatasetID, destTable.TableID)
+	log.Printf("Removing dups and writing to %s.%s\n", destTable.DatasetID(), destTable.TableID())
 	var queryString string
 	switch {
-	case strings.HasPrefix(destTable.TableID, "sidestream"):
+	case strings.HasPrefix(destTable.TableID(), "sidestream"):
 		queryString = fmt.Sprintf(dedupTemplateSidestream, src)
-	case strings.HasPrefix(destTable.TableID, "ndt"):
+	case strings.HasPrefix(destTable.TableID(), "ndt"):
 		queryString = fmt.Sprintf(dedupTemplateNDT, src)
 	default:
-		log.Println("Only handles sidestream, ndt, not " + destTable.TableID)
+		log.Println("Only handles sidestream, ndt, not " + destTable.TableID())
 		return nil, errors.New("Unknown table type")
 	}
 	query := dsExt.DestQuery(queryString, destTable, bigquery.WriteTruncate)
 
-	if query.QueryConfig.Dst == nil && query.QueryConfig.DryRun == false {
+	if query.QueryConfig().Dst == nil && query.QueryConfig().DryRun == false {
 		return nil, errors.New("query must be a destination or dry run")
 	}
 	job, err := query.Run(ctx)

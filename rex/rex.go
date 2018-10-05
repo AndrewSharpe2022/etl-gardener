@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/storage"
+	"github.com/GoogleCloudPlatform/google-cloud-go-testing/bigquery/bqiface"
 	"github.com/GoogleCloudPlatform/google-cloud-go-testing/storage/stiface"
 	"github.com/m-lab/etl-gardener/cloud"
 	"github.com/m-lab/etl-gardener/cloud/bq"
@@ -47,6 +47,7 @@ func init() {
 type ReprocessingExecutor struct {
 	cloud.BQConfig
 	StorageClient stiface.Client
+	Dataset       bqext.Dataset
 }
 
 // NewReprocessingExecutor creates a new exec.
@@ -56,12 +57,18 @@ func NewReprocessingExecutor(ctx context.Context, config cloud.BQConfig, bucketO
 	if err != nil {
 		return nil, err
 	}
-	return &ReprocessingExecutor{config, stiface.AdaptClient(storageClient)}, nil
+	client, err := bqext.DefaultBQClient(ctx, config.BQProject, bucketOpts...)
+	if err != nil {
+		return nil, err
+	}
+	ds := bqext.NewDataset(client, config.BQDataset)
+	return &ReprocessingExecutor{config, stiface.AdaptClient(storageClient), ds}, nil
 }
 
 // GetDS constructs an appropriate Dataset for BQ operations.
+// TODO NOW remove this.
 func (rex *ReprocessingExecutor) GetDS() (bqext.Dataset, error) {
-	return bqext.NewDataset(rex.BQProject, rex.BQDataset, rex.Options...)
+	return rex.Dataset, nil
 }
 
 // ErrNoSaver is returned when saver has not been set.
@@ -265,7 +272,7 @@ func (rex *ReprocessingExecutor) dedup(ctx context.Context, t *state.Task) error
 
 	log.Println("Dedupping", src.FullyQualifiedName())
 	// TODO move Dedup??
-	job, err := bq.Dedup(ctx, &ds, src.TableID, dest)
+	job, err := bq.Dedup(ctx, &ds, src.TableID(), dest)
 	if err != nil {
 		if err == io.EOF {
 			if env.TestMode {
@@ -286,7 +293,7 @@ func (rex *ReprocessingExecutor) dedup(ctx context.Context, t *state.Task) error
 // >= maxBackoff, at which point it continues using same backoff.
 // TODO - develop a BQJob interface for wrapping bigquery.Job, and allowing fakes.
 // TODO - move this to go/bqext, since it is bigquery specific and general purpose.
-func waitForJob(ctx context.Context, job *bigquery.Job, maxBackoff time.Duration, terminate <-chan struct{}) error {
+func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration, terminate <-chan struct{}) error {
 	backoff := 10 * time.Millisecond
 	previous := backoff
 	for {
@@ -327,7 +334,11 @@ func waitForJob(ctx context.Context, job *bigquery.Job, maxBackoff time.Duration
 
 func (rex *ReprocessingExecutor) finish(ctx context.Context, t *state.Task, terminate <-chan struct{}) error {
 	// TODO use a simple client instead of creating dataset?
-	ds, err := bqext.NewDataset(rex.Project, rex.BQDataset, rex.Options...)
+	client, err := bqext.DefaultBQClient(ctx, rex.Project, rex.Options...)
+	if err != nil {
+		return err
+	}
+	ds := bqext.NewDataset(client, rex.BQDataset)
 	if err != nil {
 		t.SetError(err, "NewDataset")
 		return err

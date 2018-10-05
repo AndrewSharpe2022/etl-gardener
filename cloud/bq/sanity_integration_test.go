@@ -41,10 +41,11 @@ func TestGetTableDetail(t *testing.T) {
 		t.Error("Wrong number of tasks or tests")
 	}
 
-	srcDS, err := bqext.NewDataset("mlab-testing", "src")
+	client, err := bqext.DefaultBQClient(context.Background(), "mlab-testing")
 	if err != nil {
 		t.Fatal(err)
 	}
+	srcDS := bqext.NewDataset(client, "src")
 
 	// Check that it handles full table.
 	// TODO - update to create its own test table.
@@ -59,10 +60,11 @@ func TestGetTableDetail(t *testing.T) {
 
 func TestAnnotationTableMeta(t *testing.T) {
 	// TODO - Make NewDataSet return a pointer, for consistency with bigquery.
-	dsExt, err := bqext.NewDataset("mlab-testing", "src")
+	client, err := bqext.DefaultBQClient(context.Background(), "mlab-testing")
 	if err != nil {
 		t.Fatal(err)
 	}
+	dsExt, err := bqext.NewDataset(client, "src")
 
 	tbl := dsExt.Table("DedupTest")
 	at := bq.NewAnnotatedTable(tbl, &dsExt)

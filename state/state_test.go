@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"context"
 	"errors"
 	"log"
 	"sync"
@@ -101,10 +102,12 @@ func TestSourceAndDest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dsExt, err := bqext.NewDataset("mlab-testing", "dataset")
+	// TODO NOW - replace with fake DS
+	client, err := bqext.DefaultBQClient(context.Background(), "mlab-testing")
 	if err != nil {
 		t.Fatal(err)
 	}
+	dsExt := bqext.NewDataset(client, "dataset")
 
 	src, dest, err := task.SourceAndDest(&dsExt)
 	if err != nil {

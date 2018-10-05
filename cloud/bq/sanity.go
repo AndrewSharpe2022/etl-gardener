@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"github.com/GoogleCloudPlatform/google-cloud-go-testing/bigquery/bqiface"
 	"github.com/m-lab/go/bqext"
 	"golang.org/x/net/context"
 	"google.golang.org/api/iterator"
@@ -51,7 +52,7 @@ type Detail struct {
 // It keeps track of all the info we have so far, automatically fetches
 // more data as needed, and thus avoids possibly fetching multiple times.
 type AnnotatedTable struct {
-	*bigquery.Table
+	bqiface.Table
 	dataset *bqext.Dataset // A dataset that can query the table.  May be nil.
 	meta    *bigquery.TableMetadata
 	detail  *Detail
@@ -60,7 +61,7 @@ type AnnotatedTable struct {
 }
 
 // NewAnnotatedTable creates an AnnotatedTable
-func NewAnnotatedTable(t *bigquery.Table, ds *bqext.Dataset) *AnnotatedTable {
+func NewAnnotatedTable(t bqiface.Table, ds *bqext.Dataset) *AnnotatedTable {
 	return &AnnotatedTable{Table: t, dataset: ds}
 }
 
@@ -148,10 +149,10 @@ func (at *AnnotatedTable) CheckIsRegular(ctx context.Context) error {
 
 // GetTableDetail fetches more detailed info about a partition or table.
 // Expects table to have test_id, and task_filename fields.
-func GetTableDetail(dsExt *bqext.Dataset, table *bigquery.Table) (*Detail, error) {
+func GetTableDetail(dsExt *bqext.Dataset, table bqiface.Table) (*Detail, error) {
 	// If table is a partition, then we have to separate out the partition part for the query.
-	parts := strings.Split(table.TableID, "$")
-	dataset := table.DatasetID
+	parts := strings.Split(table.TableID(), "$")
+	dataset := table.DatasetID()
 	tableName := parts[0]
 	where := ""
 	if len(parts) > 1 {
@@ -189,7 +190,7 @@ func GetTablesMatching(ctx context.Context, dsExt *bqext.Dataset, filter string)
 	ti := dsExt.Tables(ctx)
 	for t, err := ti.Next(); err == nil; t, err = ti.Next() {
 		// TODO should this be starts with?  Or a regex?
-		if strings.Contains(t.TableID, filter) {
+		if strings.Contains(t.TableID(), filter) {
 			// TODO - make this run in parallel
 			at := AnnotatedTable{Table: t, dataset: dsExt}
 			_, err := at.CachedMeta(ctx)
@@ -261,13 +262,13 @@ func getTable(bqClient *bigquery.Client, project, dataset, table, partition stri
 // at.dataset should have access to the table, but its project and dataset are not used.
 // TODO - possibly migrate this to go/bqext.
 func (at *AnnotatedTable) GetPartitionInfo(ctx context.Context) (*bqext.PartitionInfo, error) {
-	tableName := at.Table.TableID
+	tableName := at.Table.TableID()
 	parts, err := getTableParts(tableName)
 	if err != nil || !parts.isPartitioned {
 		return nil, errors.New("TableID missing partition: " + tableName)
 	}
 	// Assemble the FQ table name, without the partition suffix.
-	fullTable := fmt.Sprintf("%s:%s.%s", at.ProjectID, at.DatasetID, parts.prefix)
+	fullTable := fmt.Sprintf("%s:%s.%s", at.ProjectID(), at.DatasetID(), parts.prefix)
 
 	// This uses legacy, because PARTITION_SUMMARY is not supported in standard.
 	queryString := fmt.Sprintf(
