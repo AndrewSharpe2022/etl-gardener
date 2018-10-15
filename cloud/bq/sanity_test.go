@@ -17,6 +17,15 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
+func NewDataset(ctx context.Context, prj, dsName string) (*dataset.Dataset, error) {
+	c, err := bqfake.NewClient(ctx, prj)
+	if err != nil {
+		return nil, err
+	}
+	ds := c.Dataset(dsName)
+	return &dataset.Dataset{BqClient: c, Dataset: ds}, nil
+}
+
 // getTableParts separates a table name into prefix/base, separator, and partition date.
 func Test_getTableParts(t *testing.T) {
 	parts, err := getTableParts("table$20160102")
@@ -80,7 +89,7 @@ func TestCachedMeta(t *testing.T) {
 	ctx := context.Background()
 	c, err := bqfake.NewClient(ctx, "mlab-testing")
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	ds := c.Dataset("etl")
 
