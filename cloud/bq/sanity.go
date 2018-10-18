@@ -176,7 +176,6 @@ func GetTableDetail(ctx context.Context, dsExt *dataset.Dataset, table bqiface.T
 		  	GROUP BY task
 		)`, dataset, tableName, where)
 
-	// TODO - this should take a context?
 	err := dsExt.QueryAndParse(ctx, queryString, &detail)
 	return &detail, err
 }
@@ -388,7 +387,7 @@ func SanityCheckAndCopy(ctx context.Context, src, dest *AnnotatedTable) error {
 	log.Println("Copying...", src.TableID())
 	job, err := copier.Run(ctx)
 	if err != nil {
-		log.Println("Copy Error: %v", err)
+		log.Printf("Copy Error: %v\n", err)
 		return err
 	}
 
