@@ -14,7 +14,6 @@ func fakeMeta(partitioned bool) bigquery.TableMetadata {
 	meta := bigquery.TableMetadata{CreationTime: time.Now(), LastModifiedTime: time.Now(), NumBytes: 168, NumRows: 8}
 	if partitioned {
 		meta.TimePartitioning = &bigquery.TimePartitioning{Expiration: 0 * time.Second}
-
 	}
 	return meta
 }
@@ -40,6 +39,10 @@ func TestWaitForStableTable(t *testing.T) {
 	}
 
 	meta := fakeMeta(true)
+	// TODO: once we have either mock ability to update StreamingBuffer,
+	// or fake support for StreamingBuffer simulation, we should
+	// add that to this test.
+	// TODO meta.StreamingBuffer = &bigquery.StreamingBuffer{}
 	err = tbl.Create(ctx, &meta)
 	if err != nil {
 		t.Error(err)
