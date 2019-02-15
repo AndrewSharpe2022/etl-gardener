@@ -78,6 +78,7 @@ ErrorTimeout:
 				// Otherwise just wait and check again.
 			} else {
 				if bufferEmptySince != never {
+					metrics.WarningCount.WithLabelValues("buffer not really empty")
 					log.Println("Streaming buffer was empty for", time.Since(bufferEmptySince),
 						"but now it is not!", tt.FullyQualifiedName())
 					bufferEmptySince = never
@@ -217,6 +218,7 @@ func Dedup(ctx context.Context, dsExt *dataset.Dataset, src string, destTable bq
 
 	job, err := query.Run(ctx)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("dedup query error")
 		return nil, err
 	}
 	return job, nil

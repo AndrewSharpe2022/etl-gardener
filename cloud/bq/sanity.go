@@ -18,6 +18,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"github.com/GoogleCloudPlatform/google-cloud-go-testing/bigquery/bqiface"
+	"github.com/m-lab/etl-gardener/metrics"
 	"github.com/m-lab/go/dataset"
 	"golang.org/x/net/context"
 	"google.golang.org/api/iterator"
@@ -284,32 +285,38 @@ func (at *AnnotatedTable) GetPartitionInfo(ctx context.Context) (*dataset.Partit
 func (at *AnnotatedTable) checkAlmostAsBig(ctx context.Context, other *AnnotatedTable) error {
 	thisDetail, err := at.CachedDetail(ctx)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("metadata not available (this)")
 		return err
 	}
 	otherDetail, err := other.CachedDetail(ctx)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("metadata not available (other)")
 		return err
 	}
 
 	// Check that receiver table contains at least 99% as many tasks as
 	// other table.
 	if thisDetail.TaskFileCount < otherDetail.TaskFileCount {
+		metrics.WarningCount.WithLabelValues("fewer tasks")
 		log.Printf("Warning - fewer task files: %s(%d) < %s(%d)\n",
 			at.Table.FullyQualifiedName(), thisDetail.TaskFileCount,
 			other.Table.FullyQualifiedName(), otherDetail.TaskFileCount)
 	}
 	if float32(thisDetail.TaskFileCount) < 0.99*float32(otherDetail.TaskFileCount) {
+		metrics.FailCount.WithLabelValues("too few tasks")
 		return ErrTooFewTasks
 	}
 
 	// Check that receiver table contains at least 95% as many tests as
 	// other table.  This may be fewer if the destination table still has dups.
 	if thisDetail.TestCount < otherDetail.TestCount {
+		metrics.WarningCount.WithLabelValues("fewer tests")
 		log.Printf("Warning - fewer tests: %s(%d) < %s(%d)\n",
 			at.Table.FullyQualifiedName(), thisDetail.TestCount,
 			other.Table.FullyQualifiedName(), otherDetail.TestCount)
 	}
 	if float32(thisDetail.TestCount) < 0.95*float32(otherDetail.TestCount) {
+		metrics.FailCount.WithLabelValues("too few tests")
 		return ErrTooFewTests
 	}
 	return nil
@@ -321,12 +328,14 @@ func (at *AnnotatedTable) checkModifiedAfter(ctx context.Context, other *Annotat
 	// don't overwrite it.
 	thisMeta, err := at.CachedMeta(ctx)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("metadata not available")
 		return err
 	}
 	// Note that if other doesn't actually exist, its LastModifiedTime will be the time zero value,
 	// so this will generally work as intended.
 	if thisMeta.LastModifiedTime.Before(other.LastModifiedTime(ctx)) {
 		// TODO should perhaps delete the source table?
+		metrics.FailCount.WithLabelValues("source older than dest")
 		return ErrSrcOlderThanDest
 	}
 	return nil
@@ -370,14 +379,17 @@ func SanityCheckAndCopy(ctx context.Context, src, dest *AnnotatedTable) error {
 	// Extract the
 	srcParts, err := getTableParts(src.TableID())
 	if err != nil {
+		metrics.FailCount.WithLabelValues("bad src tableID")
 		return err
 	}
 
 	destParts, err := getTableParts(dest.TableID())
 	if err != nil {
+		metrics.FailCount.WithLabelValues("bad dest tableID")
 		return err
 	}
 	if destParts.yyyymmdd != srcParts.yyyymmdd {
+		metrics.FailCount.WithLabelValues("mismatched partitions")
 		return ErrMismatchedPartitions
 	}
 
@@ -401,6 +413,7 @@ func SanityCheckAndCopy(ctx context.Context, src, dest *AnnotatedTable) error {
 	copier.SetCopyConfig(config)
 	job, err := copier.Run(ctx)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("error copying table")
 		log.Println("Error Copying...", src.TableID(), "error:", err)
 		return err
 	}
@@ -408,6 +421,7 @@ func SanityCheckAndCopy(ctx context.Context, src, dest *AnnotatedTable) error {
 
 	err = WaitForJob(ctx, job, 10*time.Second)
 	if err != nil {
+		metrics.FailCount.WithLabelValues("error copying table")
 		log.Println("Error Waiting...", src.TableID(), "JobID:", job.ID(), "error:", err)
 	} else {
 		log.Println("Done Copying...", src.TableID(), "JobID:", job.ID())

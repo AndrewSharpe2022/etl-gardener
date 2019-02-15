@@ -321,12 +321,16 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration, 
 		} else if status.Err() != nil {
 			log.Println(job.ID(), status.Err())
 			if strings.Contains(status.Err().Error(), "Not found: Table") {
+				metrics.FailCount.WithLabelValues("table not found").Inc()
 				return state.ErrTableNotFound
 			}
 			if strings.Contains(status.Err().Error(), "rows belong to different partitions") {
+				metrics.FailCount.WithLabelValues("wrong partition").Inc()
 				return state.ErrRowsFromOtherPartition
 			}
+			// If unknown error AND maxBackoff, then return the error.
 			if backoff == maxBackoff {
+				metrics.FailCount.WithLabelValues("waitForJob: unknown error").Inc()
 				return status.Err()
 			}
 		} else if status.Done() {

@@ -242,7 +242,11 @@ func (t *Task) Delete(ctx context.Context) error {
 
 // SetError adds error information and saves to the "saver"
 func (t *Task) SetError(ctx context.Context, err error, info string) error {
-	metrics.FailCount.WithLabelValues(info)
+	msg := info
+	if msg == "" {
+		msg = err.Error()
+	}
+	metrics.FailCount.WithLabelValues(msg)
 	if t.saver == nil {
 		return ErrNoSaver
 	}
