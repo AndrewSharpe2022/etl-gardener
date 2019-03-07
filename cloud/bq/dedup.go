@@ -32,9 +32,12 @@ var (
 
 // WaitForStableTable loops checking until table exists and has no streaming buffer.
 // NOTE: We discovered that the StreamingBuffer == nil is not reliable, and must be rechecked for a minimum
-// of 5 minutes to ensure that there is no more buffered data.  (We saw reverts after as long as 4m50s).
+// of 60 minutes to ensure that there is no more buffered data.  (We saw reverts after as long as 4m50s, but
+// waiting 10 minutes still didn't eliminate missing rows).
 // TODO - refactor this to make it easier to understand.
 // TODO - move these functions to go/bqext package
+// TODO - advice from BQ team is to just include the streaming buffer in the query.  This doesn't seem to work
+//   for template tables, though.  We should try it once we migrate off template tables (which are apparently deprecated).
 func WaitForStableTable(ctx context.Context, tt bqiface.Table) error {
 	never := time.Time{}
 	// bufferEmptySince indicates the first time we saw nil StreamingBuffer
@@ -97,7 +100,8 @@ ErrorTimeout:
 			}
 			// Otherwise just wait and try again.
 		}
-		time.Sleep(time.Duration(5+rand.Intn(10)) * time.Second)
+		// Retry on average every 5 minutes.  Even this might be excessive.
+		time.Sleep(time.Duration(150+rand.Intn(300)) * time.Second)
 	}
 
 	// If we fall through here, then there is some problem...
