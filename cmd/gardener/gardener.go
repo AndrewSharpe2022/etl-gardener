@@ -40,8 +40,14 @@ type environment struct {
 	Commit  string
 	Release string
 
-	// Variables controlling reprocessing.
-	Bucket       string
+	// Determines what kind of service to run.
+	// "manager" will cause loading of config, and passive management.
+	// "legacy" will cause legacy behavior based on additional environment variables.
+	ServiceMode string
+
+	Bucket string
+
+	// These are only used for the "legacy" service mode.
 	BatchDataset string // All working data is written to the batch data set.
 	FinalDataset string // Ultimate deduplicated, partitioned output dataset.
 	QueueBase    string // Base of the queue names.  Will append -0, -1, ...
@@ -136,8 +142,24 @@ func LoadEnv() {
 		log.Println(env.Error)
 	}
 
-	// load variables required for task queue based operation.
-	loadEnvVarsForTaskQueue()
+	env.ServiceMode, ok = os.LookupEnv("SERVICE_MODE")
+	if !ok {
+		env.ServiceMode = "legacy"
+	}
+
+	switch env.ServiceMode {
+	case "manager":
+		bucket := os.Getenv("ARCHIVE_BUCKET")
+		if bucket == "" {
+			log.Println("Error: ARCHIVE_BUCKET environment variable not set.")
+			env.Error = ErrNoBucket
+		} else {
+			env.Bucket = bucket
+		}
+	case "legacy":
+		// load variables required for task queue based operation.
+		loadEnvVarsForTaskQueue()
+	}
 }
 
 func init() {
@@ -239,6 +261,11 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func jobServer(w http.ResponseWriter, r *http.Request) {
+	// This is a real hardcoded task to return.
+	fmt.Fprintf(w, "archive-measurement-lab/ndt/tcpinfo/2019/10/01")
+}
+
 // ###############################################################################
 //  Main
 // ###############################################################################
@@ -273,20 +300,17 @@ func main() {
 	http.HandleFunc("/alive", healthCheck)
 	http.HandleFunc("/ready", healthCheck)
 
-	// Check if invoked as a service.
-	isService, _ := strconv.ParseBool(os.Getenv("GARDENER_SERVICE"))
-	if isService {
-		// TODO - this creates a storage client, which should be closed on termination.
-		th, err := taskHandlerFromEnv(ctx, http.DefaultClient)
+	switch env.ServiceMode {
+	case "manager":
+		http.HandleFunc("/jobServer", jobServer)
+		healthy = true
+		log.Println("Running as manager service")
+		log.Fatal(http.ListenAndServe(":8080", nil))
 
-		if err != nil {
-			log.Println(err)
-			os.Exit(1)
-		}
-
-		// If RunDispatchLoop() returns an err instead of nil, healthy will be
+	case "legacy":
+		// If setupService() returns an err instead of nil, healthy will be
 		// set as false and eventually it will cause kubernetes to roll back.
-		err = reproc.RunDispatchLoop(ctx, th, env.Project, env.Bucket, env.Experiment, env.StartDate, env.DateSkip)
+		err := setupLegacyService(ctx)
 		if err != nil {
 			healthy = false
 			log.Println("Running as unhealthy service")
@@ -296,9 +320,8 @@ func main() {
 		}
 		log.Fatal(http.ListenAndServe(":8080", nil))
 		return
+	default:
+		log.Println("Unrecognized SERVICE_MODE.  Expected manager or legacy")
+		os.Exit(1)
 	}
-
-	// Otherwise this is a command line invocation...
-	// TODO add implementation (see code in etl repo)
-	log.Println("Command line not implemented")
 }
