@@ -17,4 +17,4 @@ spec:
     run: etl-gardener-universal
   sessionAffinity: None
   type: LoadBalancer
-  loadBalancerIP: 10.20.1.2  # etl-gardener us-east1/data-processing/gardener subnet - this hard codes the service address.
+  loadBalancerIP: 10.100.1.2  # etl-gardener us-east1/default/gardener subnet - this hard codes the service address.

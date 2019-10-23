@@ -38,7 +38,7 @@ spec:
         name: etl-gardener
         args: ["--prometheusx.listen-address=:9090"]
         env:
-        - name: SERVICE_MODE
+        - name: SERVICE_MODE # Whether to use task-queues or run as manager.
           value: "manager"
         - name: ARCHIVE_BUCKET  # This will eventually be provided through k8s configmap.
           value: "archive-measurement-lab"
