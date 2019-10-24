@@ -263,6 +263,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 
 func jobServer(w http.ResponseWriter, r *http.Request) {
 	// This is a real hardcoded task to return.
+	log.Println(r.RequestURI)
 	fmt.Fprintf(w, "archive-measurement-lab/ndt/tcpinfo/2019/10/01")
 }
 
