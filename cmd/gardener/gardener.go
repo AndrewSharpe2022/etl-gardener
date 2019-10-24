@@ -264,7 +264,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 func jobServer(w http.ResponseWriter, r *http.Request) {
 	// This is a real hardcoded task to return.
 	log.Println(r.RequestURI)
-	fmt.Fprintf(w, "archive-measurement-lab/ndt/tcpinfo/2019/10/01")
+	fmt.Fprint(w, "archive-measurement-lab/ndt/tcpinfo/2019/10/01")
 }
 
 // ###############################################################################
@@ -303,26 +303,32 @@ func main() {
 
 	switch env.ServiceMode {
 	case "manager":
-		http.HandleFunc("/jobServer", jobServer)
+		http.HandleFunc("/job", jobServer) // healthCheck works correctly
 		healthy = true
 		log.Println("Running as manager service")
-		log.Fatal(http.ListenAndServe(":8080", nil))
-
 	case "legacy":
-		// If setupService() returns an err instead of nil, healthy will be
+		// TODO - this creates a storage client, which should be closed on termination.
+		th, err := taskHandlerFromEnv(ctx, http.DefaultClient)
+
+		if err != nil {
+			log.Println(err)
+			os.Exit(1)
+		}
+
+		// If RunDispatchLoop() returns an err instead of nil, healthy will be
 		// set as false and eventually it will cause kubernetes to roll back.
-		err := setupLegacyService(ctx)
+		err = reproc.RunDispatchLoop(ctx, th, env.Project, env.Bucket, env.Experiment, env.StartDate, env.DateSkip)
 		if err != nil {
 			healthy = false
 			log.Println("Running as unhealthy service")
 		} else {
 			healthy = true
-			log.Println("Running as service")
+			log.Println("Running as task-queue dispatcher service")
 		}
-		log.Fatal(http.ListenAndServe(":8080", nil))
-		return
 	default:
 		log.Println("Unrecognized SERVICE_MODE.  Expected manager or legacy")
 		os.Exit(1)
 	}
+
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
