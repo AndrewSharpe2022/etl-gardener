@@ -27,7 +27,7 @@ spec:
     spec:
       # When container receives SIGTERM, it begins a new checkpoint. This can
       # take longer than the default grace period of 30s.
-      terminationGracePeriodSeconds: 300
+      terminationGracePeriodSeconds: 60
 
       # Place the pod into the Guaranteed QoS by setting equal resource
       # requests and limits for *all* containers in the pod.
@@ -58,7 +58,15 @@ spec:
             path: /alive
             port: service-port
           initialDelaySeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 4
+          successThreshold: 1
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: service-port
 
         resources:
           requests:

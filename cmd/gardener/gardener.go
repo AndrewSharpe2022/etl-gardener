@@ -30,6 +30,11 @@ import (
 	_ "expvar"
 )
 
+func init() {
+	// Always prepend the filename and line number.
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
+
 // Environment provides "global" variables.
 // Any env vars that we want to read only at startup should be stored here.
 type environment struct {
@@ -55,9 +60,6 @@ type environment struct {
 	NumQueues    int
 	StartDate    time.Time // The archive date to start reprocessing.
 	DateSkip     int       // Number of dates to skip between PostDay, to allow rapid scanning in sandbox.
-
-	// TestMode is used to change behavior for unit tests.
-	TestMode bool
 }
 
 // env provides environment vars.
@@ -162,14 +164,6 @@ func LoadEnv() {
 	}
 }
 
-func init() {
-	// HACK This allows some modified behavior when running unit tests.
-	if flag.Lookup("test.v") != nil {
-		env.TestMode = true
-	}
-	LoadEnv()
-}
-
 // ###############################################################################
 //  Batch processing task scheduling and support code
 // ###############################################################################
@@ -271,17 +265,10 @@ func jobServer(w http.ResponseWriter, r *http.Request) {
 //  Main
 // ###############################################################################
 
-func init() {
-	// Always prepend the filename and line number.
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-}
-
 func main() {
-	flag.Parse()
+	flag.Parse() // For prometheus listen address.
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	LoadEnv()
 	if env.Error != nil {
 		log.Println(env.Error)
 		log.Println(env)
@@ -303,11 +290,17 @@ func main() {
 
 	switch env.ServiceMode {
 	case "manager":
+		// This is new new "manager" mode, in which Gardener provides /job and /update apis
+		// for parsers to get work and report progress.
 		http.HandleFunc("/job", jobServer) // healthCheck works correctly
 		healthy = true
 		log.Println("Running as manager service")
 	case "legacy":
+		// This is the "legacy" mode, that manages work through task queues.
 		// TODO - this creates a storage client, which should be closed on termination.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		th, err := taskHandlerFromEnv(ctx, http.DefaultClient)
 
 		if err != nil {
