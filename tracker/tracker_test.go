@@ -39,6 +39,7 @@ func createJobs(t *testing.T, tk *tracker.Tracker, prefix string, n int) {
 		}(i)
 	}
 	wg.Wait()
+	// BUG: There may be Saves still in flight
 }
 
 func deleteJobs(t *testing.T, tk *tracker.Tracker, prefix string, n int) {
@@ -97,6 +98,8 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// BUG: There may be Saves still in flight, which can occasionally
+	// be observed as items left behind in datastore.
 }
 
 func TestConcurrentUpdates(t *testing.T) {
@@ -129,14 +132,23 @@ func TestConcurrentUpdates(t *testing.T) {
 	for i := 0; i < updates; i++ {
 		go func(i int) {
 			jn := fmt.Sprint("Job:", rand.Intn(jobs))
-			err := tk.SetJobState(jn, fmt.Sprint(i))
-			if err != nil {
-				log.Fatal(err, " ", jn)
+			if i%5 == 0 {
+				err := tk.SetJobState(jn, fmt.Sprint(i))
+				if err != nil {
+					log.Fatal(err, " ", jn)
+				}
+			} else {
+				err := tk.Heartbeat(jn, i)
+				if err != nil {
+					log.Fatal(err, " ", jn)
+				}
 			}
 			wg.Done()
 		}(i)
 	}
 	wg.Wait()
+	// BUG: There may be Saves still in flight, which can occasionally
+	// be observed as items left behind in datastore.
 
 	elapsed := time.Since(start)
 	if elapsed > 20*time.Second {

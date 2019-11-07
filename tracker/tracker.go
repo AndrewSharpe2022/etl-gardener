@@ -6,7 +6,10 @@
 //     map.
 //  2. JobState objects are persisted to a Saver, and protected by a
 //     job Mutex.  Client code accessing a JobState will always see content
-//     consistent with the saved state, and access may block to ensure this.
+//     consistent with the saved state, except for HeartbeatTime and
+//     archiveCompleted, which are allowed to move ahead of the saved
+//     state by up to a minute.
+//     Client access may block if a save is in process.
 //
 // Alternative idea for serializing updates to Saver...
 //  1. provide a buffered channel to a saver routine for each Job
@@ -38,14 +41,17 @@ var (
 // A JobState describes the state of a prefix job.
 // Completed jobs are removed from the persistent store.
 // Errored jobs are maintained in the persistent store for debugging.
-// JobState should generally be updated by the Tracker, which will
+// JobState should be updated only by the Tracker, which will
 // ensure correct serialization and Saver updates.
 type JobState struct {
 	persistence.Base
 
-	State string // String defining the current state - parsing, parsed, dedup, join, completed, failed.
+	SaveTime time.Time // Time of last saver.Save
 
-	ArchivesCompletedUpTo string // The path to the last of the contiguous completed archives.
+	HeartbeatTime     time.Time // Time of last ETL heartbeat.
+	ArchivesCompleted int       // Number of archives completed at last heartbeat.
+
+	State string // String defining the current state - parsing, parsed, dedup, join, completed, failed.
 
 	LastError string // The most recent error encountered.
 
@@ -81,6 +87,7 @@ func (j *jobWrapper) Save(s persistence.Saver) {
 		defer j.lock.Unlock()
 		ctx, cf := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cf()
+		j.SaveTime = time.Now()
 		err := s.Save(ctx, &j.JobState)
 		if err != nil {
 			// If error, all we can do is log and record the error,
@@ -193,9 +200,6 @@ func (tr *Tracker) DeleteJob(prefix string) error {
 }
 
 // SetJobState updates a job's state, and handles persistence.
-// We expect ArchivesCompletedUpTo to be updated every minute or so,
-// so this function should not allow one job update to block updates
-// to other jobs.
 func (tr *Tracker) SetJobState(prefix string, newState string) error {
 	job, err := tr.getJobForUpdate(prefix)
 	if err != nil {
@@ -204,6 +208,25 @@ func (tr *Tracker) SetJobState(prefix string, newState string) error {
 
 	job.State = newState
 	job.Save(tr.saver) // This asynchronously saves the job, and releases the job lock.
+	return nil
+}
+
+// Heartbeat updates a job's heartbeat time, and handles persistence.
+// Heartbeats are only pushed to saver every minute or so.
+func (tr *Tracker) Heartbeat(prefix string, archivesCompleted int) error {
+	job, err := tr.getJobForUpdate(prefix)
+	if err != nil {
+		return err
+	}
+
+	job.HeartbeatTime = time.Now()
+	job.ArchivesCompleted = archivesCompleted
+	if time.Since(job.SaveTime) > time.Minute {
+		job.Save(tr.saver) // This asynchronously saves the job, and releases the job lock.
+	} else {
+		// No need to save if the record was persisted recently.
+		job.lock.Unlock()
+	}
 	return nil
 }
 
