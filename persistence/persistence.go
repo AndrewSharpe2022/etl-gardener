@@ -17,6 +17,7 @@ type StateObject interface {
 // Base is the base for persistent objects.  All StateObjects should embed
 // Base and call NewBase to initialize.
 type Base struct {
+	// With datastore, this will show up in both the key and the Name field. 
 	Name string
 }
 

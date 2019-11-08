@@ -15,7 +15,6 @@
 //  1. provide a buffered channel to a saver routine for each Job
 //  2. send copies of the job to the channel.
 //  3. once the channel has the update, further updates are fine.
-
 package tracker
 
 import (
@@ -163,13 +162,13 @@ func (tr *Tracker) AddJob(prefix string) error {
 	job := jobWrapper{JobState: js}
 
 	job.lock.Lock() // Take the lock on behalf of job.Save.
+	tr.Jobs[prefix] = &job
 
 	// This asynchronously saves the job, and releases the job lock.
-	// WARNING: There may be a race here with other code deleting the job.
-	// However, future updates should restore the correct state in Saver.
+	// WARNING: There may be a race here with other code deleting a
+	// previous job with the same name.  This won't happen in practice, and,
+	// if it does, future updates should restore the correct state in Saver.
 	job.Save(tr.saver)
-
-	tr.Jobs[prefix] = &job
 
 	return nil
 }
@@ -179,12 +178,13 @@ func (tr *Tracker) DeleteJob(prefix string) error {
 	tr.lock.Lock()
 	job, ok := tr.Jobs[prefix]
 	if !ok {
+		tr.lock.Unlock()
 		return ErrPrefixNotFound
 	}
 	delete(tr.Jobs, prefix)
 	tr.lock.Unlock()
 
-	// Now no-one else can get it, but another user may already be using it.
+	// Now no-one else can get it, but other code may already have it.
 	job.lock.Lock() // Take the lock to ensure no-one else is using it.
 	defer job.lock.Unlock()
 	if job.obsolete {

@@ -73,6 +73,8 @@ func TestTrackerAddDelete(t *testing.T) {
 
 	jobs := 500
 	createJobs(t, &tk, "Job:", jobs)
+	// BUG: There may be Saves still in flight, which can occasionally
+	// be observed as items left behind in datastore.
 	deleteJobs(t, &tk, "Job:", jobs)
 }
 
@@ -93,13 +95,41 @@ func TestUpdate(t *testing.T) {
 	defer deleteJobs(t, &tk, "Job:", 2)
 
 	err = tk.SetJobState("Job:0", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	err = tk.SetJobState("Job:0", "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	err = tk.SetJobState("Job:0", "3")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// BUG: There may be Saves still in flight, which can occasionally
 	// be observed as items left behind in datastore.
+}
+
+func TestNonexistentJobAccess(t *testing.T) {
+	sctx, cf := context.WithCancel(context.Background())
+	saver, err := persistence.NewDatastoreSaver(sctx, "mlab-testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cf()
+
+	tk, err := tracker.InitTracker(saver)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(tk.SetJobState("foobar", "non-existent"))
+	t.Log(tk.DeleteJob("foobar"))
+	t.Log(tk.AddJob("foobar"))
+	t.Log(tk.AddJob("foobar"))
+	t.Log(tk.DeleteJob("foobar"))
 }
 
 func TestConcurrentUpdates(t *testing.T) {
