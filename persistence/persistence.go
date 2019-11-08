@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"log"
 	"reflect"
 	"time"
 
@@ -17,7 +18,7 @@ type StateObject interface {
 // Base is the base for persistent objects.  All StateObjects should embed
 // Base and call NewBase to initialize.
 type Base struct {
-	// With datastore, this will show up in both the key and the Name field. 
+	// With datastore, this will show up in both the key and the Name field.
 	Name string
 }
 
@@ -67,12 +68,20 @@ func (ds *DatastoreSaver) Save(ctx context.Context, o StateObject) error {
 	// 10 seconds seems sufficient.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if verbosity > 0 {
+		log.Println("Saving", o.GetName())
+	}
 	_, err := ds.Client.Put(ctx, ds.key(o), o)
+	if verbosity > 0 {
+		log.Println("Saved", o.GetName(), err)
+	}
 	if err != nil {
 		return err
 	}
 	return nil
 }
+
+var verbosity = 1
 
 // Delete implements Saver.Delete using Datastore.
 func (ds *DatastoreSaver) Delete(ctx context.Context, o StateObject) error {
@@ -80,7 +89,13 @@ func (ds *DatastoreSaver) Delete(ctx context.Context, o StateObject) error {
 	// 10 seconds seems sufficient.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if verbosity > 0 {
+		log.Println("Deleting", o.GetName())
+	}
 	err := ds.Client.Delete(ctx, ds.key(o))
+	if verbosity > 0 {
+		log.Println("Deleted", o.GetName(), err, time.Now())
+	}
 	if err != nil {
 		return err
 	}
