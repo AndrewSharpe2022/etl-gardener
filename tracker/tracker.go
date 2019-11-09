@@ -30,8 +30,8 @@ import (
 
 // Error declarations
 var (
-	ErrJobAlreadyExists       = errors.New("prefix already exists")
-	ErrPrefixNotFound         = errors.New("prefix not found")
+	ErrJobAlreadyExists       = errors.New("job already exists")
+	ErrJobNotFound            = errors.New("job not found")
 	ErrJobIsObsolete          = errors.New("job is obsolete")
 	ErrInvalidStateTransition = errors.New("invalid state transition")
 	ErrNotYetImplemented      = errors.New("not yet implemented")
@@ -95,6 +95,7 @@ func (j *jobWrapper) Save(s persistence.Saver) {
 			j.JobState.LastError = err.Error()
 			j.JobState.errors = append(j.JobState.errors, err.Error())
 		}
+		// With datastore and high save rates, this may be 2 seconds or more.
 		latency := time.Since(start)
 		if latency > 5*time.Second {
 			log.Println("Slow update:", j.Name, latency)
@@ -107,7 +108,7 @@ func newJobState(name string) JobState {
 	return JobState{
 		Base:   persistence.NewBase(name),
 		errors: make([]string, 0, 1),
-		State:  "Starting",
+		State:  "Init",
 	}
 }
 
@@ -138,11 +139,12 @@ func (tr *Tracker) getJobForUpdate(prefix string) (*jobWrapper, error) {
 		log.Println("Long latency for getJob:", prefix)
 	}
 	if !ok {
-		return nil, ErrPrefixNotFound
+		return nil, ErrJobNotFound
 	}
 
 	job.lock.Lock() // Take the lock on behalf of job.Save.
 	if job.obsolete {
+		job.lock.Unlock()
 		return nil, ErrJobIsObsolete
 	}
 
@@ -179,7 +181,7 @@ func (tr *Tracker) DeleteJob(prefix string) error {
 	job, ok := tr.Jobs[prefix]
 	if !ok {
 		tr.lock.Unlock()
-		return ErrPrefixNotFound
+		return ErrJobNotFound
 	}
 	delete(tr.Jobs, prefix)
 	tr.lock.Unlock()
