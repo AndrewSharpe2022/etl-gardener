@@ -121,8 +121,6 @@ func (tr *Tracker) NumJobs() int {
 // Sync synchronously saves all jobs to saver, removing completed jobs
 // from tracker.
 func (tr *Tracker) Sync() {
-	tr.saveLock.Lock()
-	defer tr.saveLock.Unlock()
 	tr.saveAllModifiedJobs()
 }
 
