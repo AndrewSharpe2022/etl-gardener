@@ -214,6 +214,7 @@ func (tr *Tracker) SetJobState(prefix string, newState string) error {
 		return err
 	}
 	job.State = newState
+	job.UpdateTime = time.Now()
 	tr.updateJob(job)
 	return nil
 }

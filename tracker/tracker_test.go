@@ -66,13 +66,13 @@ func TestTrackerAddDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	jobs := 500
-	createJobs(t, tk, "Job:", jobs)
-	// BUG: There may be Saves still in flight, which can occasionally
-	// be observed as items left behind in datastore.
-	completeJobs(t, tk, "Job:", jobs)
+	numJobs := 500
+	createJobs(t, tk, "500Jobs:", numJobs)
+	completeJobs(t, tk, "500Jobs:", numJobs)
 }
 
+// This tests basic Add and update of 2 jobs, and verifies
+// correct error returned when trying to update a third job.
 func TestUpdate(t *testing.T) {
 	sctx, cf := context.WithCancel(context.Background())
 	saver, err := persistence.NewDatastoreSaver(sctx, "mlab-testing")
@@ -86,25 +86,27 @@ func TestUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createJobs(t, tk, "Job:", 2)
-	defer completeJobs(t, tk, "Job:", 2)
+	createJobs(t, tk, "JobToUpdate:", 2)
+	defer completeJobs(t, tk, "JobToUpdate:", 2)
 
-	err = tk.SetJobState("Job:0", "1")
+	err = tk.SetJobState("JobToUpdate:0", "1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = tk.SetJobState("Job:0", "2")
+	err = tk.SetJobState("JobToUpdate:0", "2")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = tk.SetJobState("Job:0", "3")
+	err = tk.SetJobState("JobToUpdate:0", "3")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
+// This tests whether AddJob and SetJobState generate appropriate
+// errors when job doesn't exist.
 func TestNonexistentJobAccess(t *testing.T) {
 	sctx, cf := context.WithCancel(context.Background())
 	saver, err := persistence.NewDatastoreSaver(sctx, "mlab-testing")
@@ -133,7 +135,13 @@ func TestNonexistentJobAccess(t *testing.T) {
 	}
 
 	tk.SetJobState("foobar", "Complete")
-	tk.Sync()
+	tk.Sync() // Should cause job cleanup.
+
+	// Job should be gone now.
+	err = tk.SetJobState("foobar", "non-existent")
+	if err != tracker.ErrJobNotFound {
+		t.Error("Should be ErrJobNotFound", err)
+	}
 }
 
 func TestConcurrentUpdates(t *testing.T) {
