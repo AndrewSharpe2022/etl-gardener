@@ -150,7 +150,7 @@ func TestConcurrentUpdates(t *testing.T) {
 	}
 	defer cf()
 
-	tk, err := tracker.InitTracker(saver, time.Second)
+	tk, err := tracker.InitTracker(saver, 100*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -138,14 +138,16 @@ func (tr *Tracker) saveAllModifiedJobs() error {
 	// Start concurrent save of all jobs.
 	for key, job := range tr.jobs { // TODO - is job capture correct here?
 		if job.UpdateTime.After(last) || job.HeartbeatTime.After(last) {
-			eg.Go(func() error {
-				err := job.saveOrDelete(tr.saver)
+			jobCopy := *job
+			f := func() error {
+				err := jobCopy.saveOrDelete(tr.saver)
 				// We will eventually return only one error, so log all errors.
 				if err != nil {
 					log.Println(err)
 				}
 				return err
-			})
+			}
+			eg.Go(f)
 			if job.State == "Complete" {
 				delete(tr.jobs, key)
 			}
