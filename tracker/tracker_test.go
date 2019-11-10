@@ -42,20 +42,15 @@ func createJobs(t *testing.T, tk *tracker.Tracker, prefix string, n int) {
 	// BUG: There may be Saves still in flight
 }
 
-func deleteJobs(t *testing.T, tk *tracker.Tracker, prefix string, n int) {
+func completeJobs(t *testing.T, tk *tracker.Tracker, prefix string, n int) {
 	// Delete all jobs.
-	wg := sync.WaitGroup{}
-	wg.Add(n)
 	for i := 0; i < n; i++ {
-		go func(i int) {
-			err := tk.DeleteJob(fmt.Sprint(prefix, i))
-			if err != nil {
-				t.Error(err)
-			}
-			wg.Done()
-		}(i)
+		err := tk.SetJobState(fmt.Sprint(prefix, i), "Complete")
+		if err != nil {
+			t.Error(err)
+		}
 	}
-	wg.Wait()
+	tk.Sync() // Force synchronous save cycle.
 }
 
 func TestTrackerAddDelete(t *testing.T) {
@@ -66,16 +61,16 @@ func TestTrackerAddDelete(t *testing.T) {
 	}
 	defer cf() // This context must be kept alive for life of saver.
 
-	tk, err := tracker.InitTracker(saver)
+	tk, err := tracker.InitTracker(saver, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	jobs := 500
-	createJobs(t, &tk, "Job:", jobs)
+	createJobs(t, tk, "Job:", jobs)
 	// BUG: There may be Saves still in flight, which can occasionally
 	// be observed as items left behind in datastore.
-	deleteJobs(t, &tk, "Job:", jobs)
+	completeJobs(t, tk, "Job:", jobs)
 }
 
 func TestUpdate(t *testing.T) {
@@ -86,13 +81,13 @@ func TestUpdate(t *testing.T) {
 	}
 	defer cf()
 
-	tk, err := tracker.InitTracker(saver)
+	tk, err := tracker.InitTracker(saver, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	createJobs(t, &tk, "Job:", 2)
-	defer deleteJobs(t, &tk, "Job:", 2)
+	createJobs(t, tk, "Job:", 2)
+	defer completeJobs(t, tk, "Job:", 2)
 
 	err = tk.SetJobState("Job:0", "1")
 	if err != nil {
@@ -108,8 +103,6 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// BUG: There may be Saves still in flight, which can occasionally
-	// be observed as items left behind in datastore.
 }
 
 func TestNonexistentJobAccess(t *testing.T) {
@@ -120,16 +113,27 @@ func TestNonexistentJobAccess(t *testing.T) {
 	}
 	defer cf()
 
-	tk, err := tracker.InitTracker(saver)
+	tk, err := tracker.InitTracker(saver, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Log(tk.SetJobState("foobar", "non-existent"))
-	t.Log(tk.DeleteJob("foobar"))
-	t.Log(tk.AddJob("foobar"))
-	t.Log(tk.AddJob("foobar"))
-	t.Log(tk.DeleteJob("foobar"))
+	err = tk.SetJobState("foobar", "non-existent")
+	if err != tracker.ErrJobNotFound {
+		t.Error("Should be ErrJobNotFound", err)
+	}
+	err = tk.AddJob("foobar")
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = tk.AddJob("foobar")
+	if err != tracker.ErrJobAlreadyExists {
+		t.Error("Should be ErrJobAlreadyExists", err)
+	}
+
+	tk.SetJobState("foobar", "Complete")
+	tk.Sync()
 }
 
 func TestConcurrentUpdates(t *testing.T) {
@@ -146,14 +150,14 @@ func TestConcurrentUpdates(t *testing.T) {
 	}
 	defer cf()
 
-	tk, err := tracker.InitTracker(saver)
+	tk, err := tracker.InitTracker(saver, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	jobs := 20
-	createJobs(t, &tk, "Job:", jobs)
-	defer deleteJobs(t, &tk, "Job:", jobs)
+	createJobs(t, tk, "Job:", jobs)
+	defer completeJobs(t, tk, "Job:", jobs)
 
 	start := time.Now()
 	updates := 20 * jobs
@@ -168,7 +172,7 @@ func TestConcurrentUpdates(t *testing.T) {
 					log.Fatal(err, " ", jn)
 				}
 			} else {
-				err := tk.Heartbeat(jn, i)
+				err := tk.Heartbeat(jn)
 				if err != nil {
 					log.Fatal(err, " ", jn)
 				}
@@ -177,8 +181,6 @@ func TestConcurrentUpdates(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	// BUG: There may be Saves still in flight, which can occasionally
-	// be observed as items left behind in datastore.
 
 	elapsed := time.Since(start)
 	if elapsed > 20*time.Second {

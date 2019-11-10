@@ -2,19 +2,12 @@
 //
 // Concurrency properties:
 //  1. The job map is protected by a Mutex, but lock is only required
-//     to get a pointer to a job, so there is minimal contention on the
-//     map.
-//  2. JobState objects are persisted to a Saver, and protected by a
-//     job Mutex.  Client code accessing a JobState will always see content
-//     consistent with the saved state, except for HeartbeatTime and
-//     archiveCompleted, which are allowed to move ahead of the saved
-//     state by up to a minute.
-//     Client access may block if a save is in process.
-//
-// Alternative idea for serializing updates to Saver...
-//  1. provide a buffered channel to a saver routine for each Job
-//  2. send copies of the job to the channel.
-//  3. once the channel has the update, further updates are fine.
+//     to get a copy or set the JobState value, so there is minimal
+//     contention.
+//  2. JobState objects are persisted to a Saver by a separate
+//     goroutine that periodically updates any modified JobState objects.
+//     The JobState's updatetime is used to determine whether it needs
+//     to be saved.
 package tracker
 
 import (
@@ -26,6 +19,7 @@ import (
 	"time"
 
 	"github.com/m-lab/etl-gardener/persistence"
+	"golang.org/x/sync/errgroup"
 )
 
 // Error declarations
@@ -43,15 +37,12 @@ var (
 // JobState should be updated only by the Tracker, which will
 // ensure correct serialization and Saver updates.
 type JobState struct {
-	persistence.Base
+	persistence.Base // Includes Name field
 
-	SaveTime time.Time // Time of last saver.Save
+	UpdateTime    time.Time // Time of last update.
+	HeartbeatTime time.Time // Time of last ETL heartbeat.
 
-	HeartbeatTime     time.Time // Time of last ETL heartbeat.
-	ArchivesCompleted int       // Number of archives completed at last heartbeat.
-
-	State string // String defining the current state - parsing, parsed, dedup, join, completed, failed.
-
+	State     string // String defining the current state - parsing, parsed, dedup, join, completed, failed.
 	LastError string // The most recent error encountered.
 
 	// Not persisted
@@ -63,44 +54,27 @@ func (j JobState) GetKind() string {
 	return reflect.TypeOf(j).Name()
 }
 
-// jobWrapper is the object actually saved in the Tracker.  It adds a lock
-// object that must be held when accessing or changing the job, and while
-// persisting the job to the Saver.
-// Saving to datastore is generally slow (100 msec or so), and should be
-// done asynchronously, holding the Job lock.  However, reads and updates
-// must also hold the lock, so anyone code trying to access the job while
-// it is being saved will block.
-// TODO - perhaps use copy on write, and separate reader and writer locks?
-type jobWrapper struct {
-	lock     sync.Mutex // lock that should be held for all accesses.
-	obsolete bool
-	JobState
-}
+// saveOrDelete saves the JobState to the persistence.Saver, or, if
+// job.State is "Complete", it removes it using Saver.Delete.
+// This is threadsafe, but concurrent calls on the same job create a
+// race in the Saver, so the final value is unclear.
+func (j JobState) saveOrDelete(s persistence.Saver) error {
+	start := time.Now()
+	ctx, cf := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cf()
+	var err error
+	if j.State == "Complete" {
+		err = s.Delete(ctx, &j)
 
-// Save takes the lock, and asynchronously saves the state to the Saver.
-// This must be used to ensure that saves are properly serialized.
-// Caller must own j.lock.Lock(), and must NOT release it.
-func (j *jobWrapper) Save(s persistence.Saver) {
-	go func() {
-		start := time.Now()
-		defer j.lock.Unlock()
-		ctx, cf := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cf()
-		j.SaveTime = time.Now()
-		err := s.Save(ctx, &j.JobState)
-		if err != nil {
-			// If error, all we can do is log and record the error,
-			// TODO - maybe retry?
-			log.Println(err)
-			j.JobState.LastError = err.Error()
-			j.JobState.errors = append(j.JobState.errors, err.Error())
-		}
-		// With datastore and high save rates, this may be 2 seconds or more.
-		latency := time.Since(start)
-		if latency > 5*time.Second {
-			log.Println("Slow update:", j.Name, latency)
-		}
-	}()
+	} else {
+		err = s.Save(ctx, &j)
+	}
+	// With datastore and high save rates, this may be 2 seconds or more.
+	latency := time.Since(start)
+	if latency > 5*time.Second {
+		log.Println("Slow update:", j.Name, latency)
+	}
+	return err
 }
 
 // NewJobState creates a new JobState with provided name.
@@ -113,42 +87,95 @@ func newJobState(name string) JobState {
 }
 
 // Tracker keeps track of all the jobs in flight.
+// Only tracker functions should access any of the fields.
 type Tracker struct {
-	saver persistence.Saver
-	lock  sync.RWMutex
+	saver          persistence.Saver
+	ticker         *time.Ticker
+	saveLock       sync.Mutex // Mutex held during save cycles.
+	lastUpdateTime time.Time  // Last time updates were saved.
 
-	Jobs map[string]*jobWrapper // Map from prefix to JobState.
+	lock sync.Mutex
+
+	jobs map[string]*JobState // Map from prefix to JobState.
 }
 
 // InitTracker recovers the Tracker state from a Saver object.
-func InitTracker(saver persistence.Saver) (Tracker, error) {
+// May return error if recovery fails.
+func InitTracker(saver persistence.Saver, saveInterval time.Duration) (*Tracker, error) {
 	// TODO implement recovery.
-
-	return Tracker{saver: saver, Jobs: make(map[string]*jobWrapper, 100)}, nil
+	t := Tracker{saver: saver, jobs: make(map[string]*JobState, 100)}
+	if saveInterval > 0 {
+		t.saveEvery(saveInterval)
+	}
+	return &t, nil
 }
 
-// getJobForUpdate gets a pointer to a jobWrapper entry, with the
-// job lock held.
-func (tr *Tracker) getJobForUpdate(prefix string) (*jobWrapper, error) {
-	start := time.Now()
+// NumJobs returns the number of jobs in flight.  This includes
+// jobs in "Complete" state that have not been removed from saver.
+func (tr *Tracker) NumJobs() int {
 	tr.lock.Lock()
-	job, ok := tr.Jobs[prefix]
+	defer tr.lock.Unlock()
+	return len(tr.jobs)
+}
+
+// Sync synchronously saves all jobs to saver, removing completed jobs
+// from tracker.
+func (tr *Tracker) Sync() {
+	tr.saveLock.Lock()
+	defer tr.saveLock.Unlock()
+	tr.saveAllModifiedJobs()
+}
+
+// SaveAllModifiedJobs snapshots all modified jobs and concurrently saves
+// them.  When saving is complete, func returns nil, or the first error,
+// if there were any errors.
+func (tr *Tracker) saveAllModifiedJobs() error {
+	tr.saveLock.Lock() // Hold the lock while saving.
+	defer tr.saveLock.Unlock()
+
+	last := tr.lastUpdateTime
+	tr.lastUpdateTime = time.Now()
+	eg := errgroup.Group{}
+	tr.lock.Lock()
+	// Start concurrent save of all jobs.
+	for key, job := range tr.jobs { // TODO - is job capture correct here?
+		if job.UpdateTime.After(last) || job.HeartbeatTime.After(last) {
+			eg.Go(func() error {
+				err := job.saveOrDelete(tr.saver)
+				// We will eventually return only one error, so log all errors.
+				if err != nil {
+					log.Println(err)
+				}
+				return err
+			})
+			if job.State == "Complete" {
+				delete(tr.jobs, key)
+			}
+		}
+	}
+	// We have copied all jobs, so we can release the lock.
 	tr.lock.Unlock()
-	latency := time.Since(start)
-	if latency > time.Second {
-		log.Println("Long latency for getJob:", prefix)
-	}
-	if !ok {
-		return nil, ErrJobNotFound
-	}
+	return eg.Wait()
+}
 
-	job.lock.Lock() // Take the lock on behalf of job.Save.
-	if job.obsolete {
-		job.lock.Unlock()
-		return nil, ErrJobIsObsolete
-	}
+func (tr *Tracker) saveEvery(interval time.Duration) {
+	tr.ticker = time.NewTicker(interval)
+	go func() {
+		for range tr.ticker.C {
+			tr.saveAllModifiedJobs()
+		}
+	}()
+}
 
-	return job, nil
+// GetJob gets a copy of an existing job.
+func (tr *Tracker) getJob(prefix string) (JobState, error) {
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
+	job := tr.jobs[prefix]
+	if job == nil {
+		return JobState{}, ErrJobNotFound
+	}
+	return *job, nil
 }
 
 // AddJob adds a new job to the Tracker.
@@ -156,91 +183,62 @@ func (tr *Tracker) getJobForUpdate(prefix string) (*jobWrapper, error) {
 func (tr *Tracker) AddJob(prefix string) error {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
-	_, ok := tr.Jobs[prefix]
+	_, ok := tr.jobs[prefix]
 	if ok {
 		return ErrJobAlreadyExists
 	}
-	js := newJobState(prefix)
-	job := jobWrapper{JobState: js}
+	job := newJobState(prefix)
 
-	job.lock.Lock() // Take the lock on behalf of job.Save.
-	tr.Jobs[prefix] = &job
-
-	// This asynchronously saves the job, and releases the job lock.
-	// WARNING: There may be a race here with other code deleting a
-	// previous job with the same name.  This won't happen in practice, and,
-	// if it does, future updates should restore the correct state in Saver.
-	job.Save(tr.saver)
-
+	tr.jobs[prefix] = &job
 	return nil
 }
 
-// DeleteJob deletes a job from the tracker and persistent store.
-func (tr *Tracker) DeleteJob(prefix string) error {
+// updateJob updates an existing job.
+// May return ErrJobNotFound if job no longer exists.
+func (tr *Tracker) updateJob(job JobState) error {
 	tr.lock.Lock()
-	job, ok := tr.Jobs[prefix]
-	if !ok {
-		tr.lock.Unlock()
+	defer tr.lock.Unlock()
+	oldJob, ok := tr.jobs[job.Name]
+	if !ok || oldJob.State == "Complete" {
 		return ErrJobNotFound
 	}
-	delete(tr.Jobs, prefix)
-	tr.lock.Unlock()
 
-	// Now no-one else can get it, but other code may already have it.
-	job.lock.Lock() // Take the lock to ensure no-one else is using it.
-	defer job.lock.Unlock()
-	if job.obsolete {
-		// Someone else deleted it, so we are done.
-		return ErrJobIsObsolete
-	}
-	job.obsolete = true // Now no-one else will use it.
-
-	ctx, cf := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cf()
-	err := tr.saver.Delete(ctx, job.JobState)
-	return err
+	tr.jobs[job.Name] = &job
+	return nil
 }
 
 // SetJobState updates a job's state, and handles persistence.
 func (tr *Tracker) SetJobState(prefix string, newState string) error {
-	job, err := tr.getJobForUpdate(prefix)
+	job, err := tr.getJob(prefix)
 	if err != nil {
 		return err
 	}
-
 	job.State = newState
-	job.Save(tr.saver) // This asynchronously saves the job, and releases the job lock.
+	tr.updateJob(job)
 	return nil
 }
 
 // Heartbeat updates a job's heartbeat time, and handles persistence.
 // Heartbeats are only pushed to saver every minute or so.
-func (tr *Tracker) Heartbeat(prefix string, archivesCompleted int) error {
-	job, err := tr.getJobForUpdate(prefix)
+func (tr *Tracker) Heartbeat(prefix string) error {
+	job, err := tr.getJob(prefix)
 	if err != nil {
 		return err
 	}
-
 	job.HeartbeatTime = time.Now()
-	job.ArchivesCompleted = archivesCompleted
-	if time.Since(job.SaveTime) > time.Minute {
-		job.Save(tr.saver) // This asynchronously saves the job, and releases the job lock.
-	} else {
-		// No need to save if the record was persisted recently.
-		job.lock.Unlock()
-	}
+	tr.updateJob(job)
 	return nil
 }
 
 // SetJobError updates a job's error fields, and handles persistence.
 func (tr *Tracker) SetJobError(prefix string, errString string) error {
-	job, err := tr.getJobForUpdate(prefix)
+	job, err := tr.getJob(prefix)
 	if err != nil {
 		return err
 	}
-
+	job.UpdateTime = time.Now()
 	job.LastError = errString
 	job.errors = append(job.errors, errString)
-	job.Save(tr.saver) // This asynchronously saves the job, and releases the job lock.
+	tr.updateJob(job)
 	return nil
 }
