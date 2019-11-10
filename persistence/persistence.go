@@ -9,6 +9,8 @@ import (
 	"cloud.google.com/go/datastore"
 )
 
+var verbosity = 0
+
 // StateObject defines the interface for objects to be saved/retrieved from datastore.
 type StateObject interface {
 	GetName() string
@@ -80,8 +82,6 @@ func (ds *DatastoreSaver) Save(ctx context.Context, o StateObject) error {
 	}
 	return nil
 }
-
-var verbosity = 1
 
 // Delete implements Saver.Delete using Datastore.
 func (ds *DatastoreSaver) Delete(ctx context.Context, o StateObject) error {
