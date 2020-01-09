@@ -90,6 +90,7 @@ const (
 	Stabilizing   State = "stabilizing"
 	Deduplicating State = "deduplicating"
 	Joining       State = "joining"
+	Finishing     State = "finishing"
 	Failed        State = "failed"
 	// Note that GetStatus will never return Complete, as the
 	// Job is removed when SetJobState is called with Complete.
@@ -415,6 +416,8 @@ func (tr *Tracker) SetJobError(job Job, errString string) error {
 	}
 	status.UpdateTime = time.Now()
 	status.LastError = errString
+	// For now, we set state to failed.  We may want something different in future.
+	status.State = Failed
 	status.errors = append(status.errors, errString)
 	return tr.UpdateJob(job, status)
 }

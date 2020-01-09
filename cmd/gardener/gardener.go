@@ -30,6 +30,7 @@ import (
 
 	"github.com/m-lab/etl-gardener/cloud"
 	job "github.com/m-lab/etl-gardener/job-service"
+	"github.com/m-lab/etl-gardener/ops"
 	"github.com/m-lab/etl-gardener/reproc"
 	"github.com/m-lab/etl-gardener/rex"
 	"github.com/m-lab/etl-gardener/state"
@@ -328,6 +329,8 @@ func mustStandardTracker() *tracker.Tracker {
 //  Main
 // ###############################################################################
 
+var mainCtx, mainCancel = context.WithCancel(context.Background())
+
 func main() {
 	defer mainCancel()
 
@@ -371,6 +374,15 @@ func main() {
 		// This is new new "manager" mode, in which Gardener provides /job and /update apis
 		// for parsers to get work and report progress.
 		globalTracker = mustStandardTracker()
+
+		// TODO - refactor this block.
+		config := cloud.Config{
+			Project: env.Project,
+			Client:  http.DefaultClient}
+		bqConfig := NewBQConfig(config)
+		monitor := ops.StandardMonitor(bqConfig)
+		monitor.Watch(mainCtx, globalTracker, time.Minute)
+
 		handler := tracker.NewHandler(globalTracker)
 		handler.Register(mux)
 

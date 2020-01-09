@@ -71,12 +71,27 @@ func StandardMonitor(config cloud.BQConfig) *Monitor {
 	m.AddAction(tracker.ParseComplete,
 		trueCondition,
 		newStateFunc(tracker.Stabilizing),
-		"Stabilizing")
+		"Changing to Stabilizing")
 	m.AddAction(tracker.Stabilizing,
 		// HACK
 		func(ctx context.Context, j tracker.Job) bool { return m.waitForStableTable(ctx, j) == nil },
 		newStateFunc(tracker.Deduplicating),
-		"Deduplicating not implemented")
+		"Stabilizing")
+	m.AddAction(tracker.Deduplicating,
+		// HACK
+		trueCondition,
+		func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
+			err := m.dedup(ctx, j)
+			if err != nil {
+				log.Println(err)
+				tk.SetJobError(j, err.Error())
+				// tracker error
+				return
+			}
+			s.State = tracker.Finishing
+			tk.UpdateJob(j, s)
+		},
+		"Deduplicating")
 	return m
 }
 
