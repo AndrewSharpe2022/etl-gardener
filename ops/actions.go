@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"github.com/GoogleCloudPlatform/google-cloud-go-testing/bigquery/bqiface"
+	"github.com/googleapis/google-cloud-go-testing/bigquery/bqiface"
+	"github.com/m-lab/go/dataset"
+
 	"github.com/m-lab/etl-gardener/cloud"
 	"github.com/m-lab/etl-gardener/cloud/bq"
 	"github.com/m-lab/etl-gardener/state"
 	"github.com/m-lab/etl-gardener/tracker"
 	"github.com/m-lab/etl/etl"
-	"github.com/m-lab/go/dataset"
 )
 
 // PartitionedTable creates BQ Table for legacy source templated table
@@ -64,22 +65,32 @@ func isTest() bool {
 	return flag.Lookup("test.v") != nil
 }
 
+func newStateFunc(state tracker.State) ActionFunc {
+	return func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
+		log.Println(j, state)
+		err := tk.SetStatus(j, state, "") // TODO support annotation.
+		if err != nil {
+			log.Println(err)
+		}
+	}
+}
+
 // StandardMonitor creates the standard monitor that handles several state transitions.
 // It is currently incomplete.
-func StandardMonitor(config cloud.BQConfig) *Monitor {
-	m := NewMonitor(config)
-	m.AddAction(tracker.ParseComplete,
-		trueCondition,
+func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
+	m := NewMonitor(config, tk)
+	m.AddAction("ParseComplete", tracker.ParseComplete,
+		nil,
 		newStateFunc(tracker.Stabilizing),
 		"Changing to Stabilizing")
-	m.AddAction(tracker.Stabilizing,
+	m.AddAction("Stabilizing", tracker.Stabilizing,
 		// HACK
 		func(ctx context.Context, j tracker.Job) bool { return m.waitForStableTable(ctx, j) == nil },
 		newStateFunc(tracker.Deduplicating),
 		"Stabilizing")
-	m.AddAction(tracker.Deduplicating,
+	m.AddAction("Deduplicating", tracker.Deduplicating,
 		// HACK
-		trueCondition,
+		nil,
 		func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
 			err := m.dedup(ctx, j)
 			if err != nil {
@@ -175,5 +186,4 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 		}
 		time.Sleep(backoff)
 	}
-	return nil
 }

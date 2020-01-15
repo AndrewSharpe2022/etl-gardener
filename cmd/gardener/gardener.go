@@ -329,8 +329,6 @@ func mustStandardTracker() *tracker.Tracker {
 //  Main
 // ###############################################################################
 
-var mainCtx, mainCancel = context.WithCancel(context.Background())
-
 func main() {
 	defer mainCancel()
 
@@ -380,8 +378,8 @@ func main() {
 			Project: env.Project,
 			Client:  http.DefaultClient}
 		bqConfig := NewBQConfig(config)
-		monitor := ops.StandardMonitor(bqConfig)
-		monitor.Watch(mainCtx, globalTracker, time.Minute)
+		monitor := ops.StandardMonitor(bqConfig, globalTracker)
+		monitor.Watch(mainCtx, time.Minute)
 
 		handler := tracker.NewHandler(globalTracker)
 		handler.Register(mux)
