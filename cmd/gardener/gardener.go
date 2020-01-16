@@ -379,7 +379,7 @@ func main() {
 			Client:  http.DefaultClient}
 		bqConfig := NewBQConfig(config)
 		monitor := ops.StandardMonitor(bqConfig, globalTracker)
-		monitor.Watch(mainCtx, time.Minute)
+		go monitor.Watch(mainCtx, time.Minute)
 
 		handler := tracker.NewHandler(globalTracker)
 		handler.Register(mux)
