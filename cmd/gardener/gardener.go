@@ -378,6 +378,8 @@ func main() {
 			Project: env.Project,
 			Client:  http.DefaultClient}
 		bqConfig := NewBQConfig(config)
+		bqConfig.BQFinalDataset = "base_tables"
+		bqConfig.BQBatchDataset = "batch"
 		monitor := ops.StandardMonitor(bqConfig, globalTracker)
 		go monitor.Watch(mainCtx, time.Minute)
 
