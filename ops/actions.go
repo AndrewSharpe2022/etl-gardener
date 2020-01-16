@@ -22,6 +22,7 @@ import (
 // PartitionedTable creates BQ Table for legacy source templated table
 func PartitionedTable(j tracker.Job, ds *dataset.Dataset) bqiface.Table {
 	tableName := etl.DirToTablename(j.Datatype)
+	log.Println(ds.Dataset, tableName)
 
 	src := ds.Table(tableName + "$" + j.Date.Format("20060102"))
 	return src
@@ -30,6 +31,7 @@ func PartitionedTable(j tracker.Job, ds *dataset.Dataset) bqiface.Table {
 // TemplateTable creates BQ Table for legacy source templated table
 func TemplateTable(j tracker.Job, ds *dataset.Dataset) bqiface.Table {
 	tableName := etl.DirToTablename(j.Datatype)
+	log.Println(ds.Dataset, tableName)
 
 	src := ds.Table(tableName + "_" + j.Date.Format("20060102"))
 	return src
