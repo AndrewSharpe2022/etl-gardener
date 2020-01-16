@@ -35,6 +35,13 @@ var (
 // TODO - refactor this to make it easier to understand.
 // TODO - move these functions to go/bqext package
 func WaitForStableTable(ctx context.Context, tt bqiface.Table) error {
+	fqn := tt.FullyQualifiedName()
+	log.Println("Wait for table ready", fqn)
+	if strings.Contains(fqn, "tcpinfo_") ||
+		strings.Contains(fqn, "ndt5_") {
+		log.Println("Don't have to wait for template table streaming buffers?")
+		return nil
+	}
 	never := time.Time{}
 	// bufferEmptySince indicates the first time we saw nil StreamingBuffer
 	bufferEmptySince := never
@@ -47,7 +54,6 @@ func WaitForStableTable(ctx context.Context, tt bqiface.Table) error {
 		errorTimeout = 100 * time.Millisecond
 	}
 	errorDeadline := time.Now().Add(errorTimeout)
-	log.Println("Wait for table ready", tt.FullyQualifiedName())
 	var err error
 	var meta *bigquery.TableMetadata
 ErrorTimeout:
