@@ -4,6 +4,7 @@ package ops
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -147,6 +148,7 @@ func (m *Monitor) Watch(ctx context.Context, period time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println("Monitor.Watch terminating")
 			return
 
 		case <-ticker.C:

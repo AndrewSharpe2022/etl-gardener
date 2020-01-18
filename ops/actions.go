@@ -137,6 +137,7 @@ func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
 			return err
 		}
 	}
+	log.Println("Job:", bqJob.ID())
 	waitForJob(ctx, bqJob, time.Minute)
 	return nil
 }
