@@ -105,6 +105,7 @@ const (
 type Status struct {
 	HeartbeatTime time.Time // Time of last ETL heartbeat.
 
+	StartTime    time.Time // Time the job was initialized.
 	UpdateTime   time.Time // Time of last update.
 	UpdateDetail string    // Note from last update
 	UpdateCount  int       // Number of updates
@@ -134,11 +135,17 @@ func (s Status) isDone() bool {
 	return s.State == Complete
 }
 
+// Age returns the age of the Job, rounded to nearest second.
+func (s Status) Age() time.Duration {
+	return time.Since(s.StartTime).Round(time.Second)
+}
+
 // NewStatus creates a new Status with provided parameters.
 func NewStatus() Status {
 	return Status{
-		State:  Init,
-		errors: make([]string, 0, 1),
+		State:     Init,
+		errors:    make([]string, 0, 1),
+		StartTime: time.Now(),
 	}
 }
 
@@ -193,15 +200,17 @@ var jobsTemplate = template.Must(template.New("").Parse(
 	<table style="width:100%%">
 		<tr>
 			<th> Job </th>
+			<th> Age </th>
 			<th> UpdateTime </th>
 			<th> State </th>
-			<th> UpdateDetail </th>
-			<th> UpdateCount </th>
-			<th> LastError </th>
+			<th> Detail </th>
+			<th> Updates </th>
+			<th> Error </th>
 		</tr>
 	    {{range .Jobs}}
 		<tr>
 			<td> {{.Job}} </td>
+			<td> {{.Status.Age}} </td>
 			<td> {{.Status.UpdateTime.Format "01/02~15:04:05"}} </td>
 			<td {{ if or (eq .Status.State "%s") (eq .Status.State "%s")}}
 					style="color: red;"
