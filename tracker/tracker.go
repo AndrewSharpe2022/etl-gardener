@@ -237,9 +237,12 @@ func (jobs JobMap) WriteHTML(w io.Writer) error {
 	for j := range jobs {
 		pairs = append(pairs, Pair{Job: j, Status: jobs[j]})
 	}
+	// Order by age.
+	// TODO - color code by how recently there has been an update.  We generally
+	// expect some update every 5 to 10 minutes.
 	sort.Slice(pairs,
 		func(i, j int) bool {
-			return pairs[i].Status.UpdateTime.Before(pairs[j].Status.UpdateTime)
+			return pairs[i].Status.StartTime.Before(pairs[j].Status.StartTime)
 		})
 	jr := JobRep{Title: "Jobs", Jobs: pairs}
 
