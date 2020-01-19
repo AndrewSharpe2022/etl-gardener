@@ -96,9 +96,11 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 		func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
 			err := m.dedup(ctx, j)
 			if err != nil {
+				if err == state.ErrBQRateLimitExceeded {
+					return // Should try again
+				}
 				log.Println(err)
 				tk.SetJobError(j, err.Error())
-				// tracker error
 				return
 			}
 			s.State = tracker.Finishing
@@ -138,9 +140,7 @@ func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
 			return err
 		}
 	}
-	log.Println("Job:", bqJob.ID())
-	waitForJob(ctx, bqJob, time.Minute)
-	return nil
+	return waitForJob(ctx, bqJob, time.Minute)
 }
 
 // WaitForJob waits for job to complete.  Uses fibonacci backoff until the backoff
@@ -149,6 +149,7 @@ func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
 // TODO - develop a BQJob interface for wrapping bigquery.Job, and allowing fakes.
 // TODO - move this to go/dataset, since it is bigquery specific and general purpose.
 func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) error {
+	log.Println("Wait for job:", job.ID())
 	backoff := 10 * time.Second // Some jobs finish much quicker, but we don't really care that much.
 	previous := backoff
 	for {
@@ -158,7 +159,7 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 		default:
 			status, err := job.Wait(ctx)
 			if err != nil {
-				log.Println(err)
+				log.Println(job.ID(), err)
 				return err
 			} else if status.Err() != nil {
 				// NOTE we are getting rate limit exceeded errors here.
@@ -172,12 +173,9 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 				if strings.Contains(status.Err().Error(), "rows belong to different partitions") {
 					return state.ErrRowsFromOtherPartition
 				}
-				if backoff == maxBackoff {
-					log.Println("reached max backoff")
-					// return status.Err()
-				}
 			} else if status.Done() {
-				break
+				log.Println("DONE:", job.ID())
+				return nil
 			}
 			if backoff+previous < maxBackoff {
 				tmp := previous
@@ -186,7 +184,6 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 			} else {
 				backoff = maxBackoff
 			}
-
 		}
 		time.Sleep(backoff)
 	}
