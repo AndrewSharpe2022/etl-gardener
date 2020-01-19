@@ -176,7 +176,8 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 					return state.ErrRowsFromOtherPartition
 				}
 			} else if status.Done() {
-				log.Println("DONE:", job.ID())
+				// TODO add metrics for dedup statistics.
+				log.Printf("DONE: %s TotalBytes: %d\n", job.ID(), status.Statistics.TotalBytesProcessed)
 				return nil
 			}
 			if backoff+previous < maxBackoff {

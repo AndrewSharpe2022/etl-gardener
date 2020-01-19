@@ -190,7 +190,7 @@ var jobsTemplate = template.Must(template.New("").Parse(
 	  border: 2px solid black;
 	}
 	</style>
-	<table style="width:80%%">
+	<table style="width:100%%">
 		<tr>
 			<th> Job </th>
 			<th> UpdateTime </th>
