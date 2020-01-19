@@ -381,7 +381,7 @@ func main() {
 		bqConfig.BQFinalDataset = "base_tables"
 		bqConfig.BQBatchDataset = "batch"
 		monitor := ops.StandardMonitor(bqConfig, globalTracker)
-		go monitor.Watch(mainCtx, time.Minute)
+		go monitor.Watch(mainCtx, 5*time.Second)
 
 		handler := tracker.NewHandler(globalTracker)
 		handler.Register(mux)
