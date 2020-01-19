@@ -94,6 +94,8 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 		// HACK
 		nil,
 		func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
+			start := time.Now()
+			// TODO - pass tracker to dedup, so dedup can record the JobID.
 			err := m.dedup(ctx, j)
 			if err != nil {
 				if err == state.ErrBQRateLimitExceeded {
@@ -105,7 +107,7 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 			}
 			s.State = tracker.Finishing
 			log.Println(j, s.State)
-			tk.UpdateJob(j, s)
+			tk.SetStatus(j, tracker.Finishing, "dedup took "+time.Since(start).String())
 		},
 		"Deduplicating")
 	return m
