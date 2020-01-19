@@ -107,7 +107,7 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 			}
 			s.State = tracker.Finishing
 			log.Println(j, s.State)
-			tk.SetStatus(j, tracker.Finishing, "dedup took "+time.Since(start).String())
+			tk.SetStatus(j, tracker.Finishing, "dedup took "+time.Since(start).Round(100*time.Millisecond).String())
 		},
 		"Deduplicating")
 	return m
