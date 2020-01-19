@@ -107,6 +107,7 @@ type Status struct {
 
 	UpdateTime   time.Time // Time of last update.
 	UpdateDetail string    // Note from last update
+	UpdateCount  int       // Number of updates
 
 	State     State  // String defining the current state.
 	LastError string // The most recent error encountered.
@@ -195,6 +196,7 @@ var jobsTemplate = template.Must(template.New("").Parse(
 			<th> UpdateTime </th>
 			<th> State </th>
 			<th> UpdateDetail </th>
+			<th> UpdateCount </th>
 			<th> LastError </th>
 		</tr>
 	    {{range .Jobs}}
@@ -206,6 +208,7 @@ var jobsTemplate = template.Must(template.New("").Parse(
 					{{ else }}{{ end }}>
 			  {{.Status.State}} </td>
 			<td> {{.Status.UpdateDetail}} </td>
+			<td> {{.Status.UpdateCount}} </td>
 			<td> {{.Status.LastError}} </td>
 		</tr>
 	    {{end}}
@@ -395,6 +398,7 @@ func (tr *Tracker) SetStatus(job Job, newState State, detail string) error {
 	status.State = newState
 	status.UpdateTime = time.Now()
 	status.UpdateDetail = detail
+	status.UpdateCount++
 	return tr.UpdateJob(job, status)
 }
 
