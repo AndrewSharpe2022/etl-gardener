@@ -447,6 +447,7 @@ func (tr *Tracker) GetAll() JobMap {
 	for k, v := range tr.jobs {
 		if tr.expirationTime > 0 && time.Since(v.UpdateTime) > tr.expirationTime {
 			// Remove any obsolete jobs.
+			metrics.TasksInFlight.Dec()
 			delete(tr.jobs, k)
 		} else {
 			m[k] = v
