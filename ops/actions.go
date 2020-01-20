@@ -125,7 +125,7 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 				return
 			}
 			s.State = tracker.Complete
-			log.Println(j, s.State)
+			log.Println(j, s.State, time.Since(start).Round(100*time.Millisecond))
 			tk.SetStatus(j, tracker.Complete, "delete took "+time.Since(start).Round(100*time.Millisecond).String())
 		},
 		"Deleting template table")
