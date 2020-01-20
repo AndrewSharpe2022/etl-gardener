@@ -176,7 +176,7 @@ func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
 			return err
 		}
 	}
-	return waitForJob(ctx, bqJob, time.Minute)
+	return waitForJob(ctx, j, bqJob, time.Minute)
 }
 
 // WaitForJob waits for job to complete.  Uses fibonacci backoff until the backoff
@@ -184,8 +184,8 @@ func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
 // TODO - why don't we just use job.Wait()?  Just because of terminate?
 // TODO - develop a BQJob interface for wrapping bigquery.Job, and allowing fakes.
 // TODO - move this to go/dataset, since it is bigquery specific and general purpose.
-func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) error {
-	log.Println("Wait for job:", job.ID())
+func waitForJob(ctx context.Context, job tracker.Job, bqJob bqiface.Job, maxBackoff time.Duration) error {
+	log.Println("Wait for job:", bqJob.ID())
 	backoff := 10 * time.Second // Some jobs finish much quicker, but we don't really care that much.
 	previous := backoff
 	for {
@@ -193,13 +193,13 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			status, err := job.Wait(ctx)
+			status, err := bqJob.Wait(ctx)
 			if err != nil {
-				log.Println(job.ID(), err)
+				log.Println(job.String(), bqJob.ID(), err)
 				return err
 			} else if status.Err() != nil {
 				// NOTE we are getting rate limit exceeded errors here.
-				log.Println(job.ID(), status.Err())
+				log.Println(job, bqJob.ID(), status.Err())
 				if strings.Contains(status.Err().Error(), "rateLimitExceeded") {
 					return state.ErrBQRateLimitExceeded
 				}
@@ -211,7 +211,7 @@ func waitForJob(ctx context.Context, job bqiface.Job, maxBackoff time.Duration) 
 				}
 			} else if status.Done() {
 				// TODO add metrics for dedup statistics.
-				log.Printf("DONE: %s TotalBytes: %d\n", job.ID(), status.Statistics.TotalBytesProcessed)
+				log.Printf("DONE: %s (%s) TotalBytes: %d\n", job, bqJob.ID(), status.Statistics.TotalBytesProcessed)
 				return nil
 			}
 			if backoff+previous < maxBackoff {
