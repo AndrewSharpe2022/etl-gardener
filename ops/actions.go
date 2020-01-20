@@ -110,7 +110,41 @@ func StandardMonitor(config cloud.BQConfig, tk *tracker.Tracker) *Monitor {
 			tk.SetStatus(j, tracker.Finishing, "dedup took "+time.Since(start).Round(100*time.Millisecond).String())
 		},
 		"Deduplicating")
+	m.AddAction("Deleting", tracker.Finishing,
+		nil,
+		func(ctx context.Context, tk *tracker.Tracker, j tracker.Job, s tracker.Status) {
+			start := time.Now()
+			// TODO - pass tracker to dedup, so dedup can record the JobID.
+			err := m.deleteSrc(ctx, j)
+			if err != nil {
+				if err == state.ErrBQRateLimitExceeded {
+					return // Should try again
+				}
+				log.Println(err)
+				tk.SetJobError(j, err.Error())
+				return
+			}
+			s.State = tracker.Complete
+			log.Println(j, s.State)
+			tk.SetStatus(j, tracker.Complete, "delete took "+time.Since(start).Round(100*time.Millisecond).String())
+		},
+		"Deleting template table")
 	return m
+}
+
+func (m *Monitor) deleteSrc(ctx context.Context, j tracker.Job) error {
+	c, err := bigquery.NewClient(ctx, m.bqconfig.BQProject, m.bqconfig.Options...)
+	if err != nil {
+		return err
+	}
+	bqClient := bqiface.AdaptClient(c)
+	ds := dataset.Dataset{Dataset: bqClient.Dataset(m.bqconfig.BQBatchDataset), BqClient: bqClient}
+
+	src := TemplateTable(j, &ds)
+
+	delCtx, cf := context.WithTimeout(ctx, time.Minute)
+	defer cf()
+	return src.Delete(delCtx)
 }
 
 func (m *Monitor) dedup(ctx context.Context, j tracker.Job) error {
