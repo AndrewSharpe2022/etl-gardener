@@ -135,9 +135,9 @@ func (s Status) isDone() bool {
 	return s.State == Complete
 }
 
-// Age returns the age of the Job, rounded to nearest second.
-func (s Status) Age() time.Duration {
-	return time.Since(s.StartTime).Round(time.Second)
+// Elapsed returns the elapsed time of the Job, rounded to nearest second.
+func (s Status) Elapsed() time.Duration {
+	return s.UpdateTime.Sub(s.StartTime).Round(time.Second)
 }
 
 // NewStatus creates a new Status with provided parameters.
@@ -200,7 +200,7 @@ var jobsTemplate = template.Must(template.New("").Parse(
 	<table style="width:100%%">
 		<tr>
 			<th> Job </th>
-			<th> Age </th>
+			<th> Elapsed </th>
 			<th> UpdateTime </th>
 			<th> State </th>
 			<th> Detail </th>
@@ -210,7 +210,7 @@ var jobsTemplate = template.Must(template.New("").Parse(
 	    {{range .Jobs}}
 		<tr>
 			<td> {{.Job}} </td>
-			<td> {{.Status.Age}} </td>
+			<td> {{.Status.Elapsed}} </td>
 			<td> {{.Status.UpdateTime.Format "01/02~15:04:05"}} </td>
 			<td {{ if or (eq .Status.State "%s") (eq .Status.State "%s")}}
 					style="color: red;"
