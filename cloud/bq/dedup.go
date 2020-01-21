@@ -37,11 +37,7 @@ var (
 func WaitForStableTable(ctx context.Context, tt bqiface.Table) error {
 	fqn := tt.FullyQualifiedName()
 	log.Println("Wait for table ready", fqn)
-	if strings.Contains(fqn, "tcpinfo_") ||
-		strings.Contains(fqn, "ndt5_") {
-		log.Println("Don't have to wait for template table streaming buffers?")
-		return nil
-	}
+
 	never := time.Time{}
 	// bufferEmptySince indicates the first time we saw nil StreamingBuffer
 	bufferEmptySince := never
