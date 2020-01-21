@@ -393,6 +393,7 @@ func (tr *Tracker) UpdateJob(job Job, state Status) error {
 	}
 
 	if state.isDone() {
+		log.Println("Deleting stale job", job)
 		delete(tr.jobs, job)
 		metrics.TasksInFlight.Dec()
 	} else {
