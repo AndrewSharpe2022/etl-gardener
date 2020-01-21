@@ -393,7 +393,6 @@ func (tr *Tracker) UpdateJob(job Job, state Status) error {
 	}
 
 	if state.isDone() {
-		log.Println("Deleting stale job", job)
 		delete(tr.jobs, job)
 		metrics.TasksInFlight.Dec()
 	} else {
@@ -449,6 +448,7 @@ func (tr *Tracker) GetAll() JobMap {
 		if tr.expirationTime > 0 && time.Since(v.UpdateTime) > tr.expirationTime {
 			// Remove any obsolete jobs.
 			metrics.TasksInFlight.Dec()
+			log.Println("Deleting stale job", k)
 			delete(tr.jobs, k)
 		} else {
 			m[k] = v
